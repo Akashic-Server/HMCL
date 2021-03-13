@@ -31,8 +31,11 @@ import javafx.scene.layout.VBox;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorAccount;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorServer;
 import org.jackhuang.hmcl.setting.Theme;
+import org.jackhuang.hmcl.task.Schedulers;
+import org.jackhuang.hmcl.task.Task;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
+import org.jackhuang.hmcl.ui.construct.SpinnerPane;
 import org.jackhuang.hmcl.util.javafx.BindingMapping;
 
 import static org.jackhuang.hmcl.ui.FXUtils.runInFX;
@@ -86,20 +89,38 @@ public class AccountListItemSkin extends SkinBase<AccountListItem> {
         right.setAlignment(Pos.CENTER_RIGHT);
 
         JFXButton btnRefresh = new JFXButton();
-        btnRefresh.setOnMouseClicked(e -> skinnable.refresh());
+        SpinnerPane spinnerRefresh = new SpinnerPane();
+        btnRefresh.setOnMouseClicked(e -> {
+            spinnerRefresh.showSpinner();
+            skinnable.refreshAsync()
+                    .whenComplete(ex -> spinnerRefresh.hideSpinner())
+                    .start();
+        });
         btnRefresh.getStyleClass().add("toggle-icon4");
         btnRefresh.setGraphic(SVG.refresh(Theme.blackFillBinding(), -1, -1));
         runInFX(() -> FXUtils.installFastTooltip(btnRefresh, i18n("button.refresh")));
-        right.getChildren().add(btnRefresh);
+        spinnerRefresh.setContent(btnRefresh);
+        right.getChildren().add(spinnerRefresh);
 
         JFXButton btnUpload = new JFXButton();
-        btnUpload.setOnMouseClicked(e -> skinnable.uploadSkin());
+        SpinnerPane spinnerUpload = new SpinnerPane();
+        btnUpload.setOnMouseClicked(e -> {
+            Task<?> uploadTask = skinnable.uploadSkin();
+            if (uploadTask != null) {
+                spinnerUpload.showSpinner();
+                uploadTask
+                        .whenComplete(Schedulers.javafx(), ex -> spinnerUpload.hideSpinner())
+                        .start();
+            }
+        });
         btnUpload.getStyleClass().add("toggle-icon4");
         btnUpload.setGraphic(SVG.hanger(Theme.blackFillBinding(), -1, -1));
         runInFX(() -> FXUtils.installFastTooltip(btnUpload, i18n("account.skin.upload")));
-        btnUpload.managedProperty().bind(btnUpload.visibleProperty());
-        btnUpload.visibleProperty().bind(skinnable.canUploadSkin());
-        right.getChildren().add(btnUpload);
+        spinnerUpload.managedProperty().bind(spinnerUpload.visibleProperty());
+        spinnerUpload.visibleProperty().bind(skinnable.canUploadSkin());
+        spinnerUpload.setContent(btnUpload);
+        spinnerUpload.getStyleClass().add("small-spinner-pane");
+        right.getChildren().add(spinnerUpload);
 
         JFXButton btnRemove = new JFXButton();
         btnRemove.setOnMouseClicked(e -> skinnable.remove());
