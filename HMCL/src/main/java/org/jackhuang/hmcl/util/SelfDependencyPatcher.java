@@ -7,10 +7,6 @@ import org.jackhuang.hmcl.util.platform.OperatingSystem;
 import javax.swing.*;
 import java.awt.*;
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,8 +15,7 @@ import java.util.List;
 import java.util.*;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
-import java.util.function.Consumer;
-import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 import static java.lang.Class.forName;
 import static org.jackhuang.hmcl.Metadata.HMCL_DIRECTORY;
@@ -36,68 +31,32 @@ import static org.jackhuang.hmcl.util.platform.JavaVersion.CURRENT_JAVA;
  */
 public class SelfDependencyPatcher {
     private static final Path DEPENDENCIES_DIR_PATH = HMCL_DIRECTORY.resolve("dependencies");
-    private static final Map<Integer, List<String>> JFX_DEPENDENCIES = new LinkedHashMap<Integer, List<String>>(5, 1F) {
-        {
-            put(15, Arrays.asList(
-                    jfxUrl("swing", "15.0.1"),
-                    jfxUrl("media", "15.0.1"),
-                    jfxUrl("fxml", "15.0.1"),
-                    jfxUrl("web", "15.0.1"),
-                    jfxUrl("controls", "15.0.1"),
-                    jfxUrl("graphics", "15.0.1"),
-                    jfxUrl("base", "15.0.1")
-            ));
-            put(14, Arrays.asList(
-                    jfxUrl("swing", "14.0.2"),
-                    jfxUrl("media", "14.0.2"),
-                    jfxUrl("fxml", "14.0.2"),
-                    jfxUrl("web", "14.0.2"),
-                    jfxUrl("controls", "14.0.2"),
-                    jfxUrl("graphics", "14.0.2"),
-                    jfxUrl("base", "14.0.2")
-            ));
-            put(13, Arrays.asList(
-                    jfxUrl("swing", "13.0.2"),
-                    jfxUrl("media", "13.0.2"),
-                    jfxUrl("fxml", "13.0.2"),
-                    jfxUrl("web", "13.0.2"),
-                    jfxUrl("controls", "13.0.2"),
-                    jfxUrl("graphics", "13.0.2"),
-                    jfxUrl("base", "13.0.2")
-            ));
-            put(12, Arrays.asList(
-                    jfxUrl("swing", "12.0.2"),
-                    jfxUrl("media", "12.0.2"),
-                    jfxUrl("fxml", "12.0.2"),
-                    jfxUrl("web", "12.0.2"),
-                    jfxUrl("controls", "12.0.2"),
-                    jfxUrl("graphics", "12.0.2"),
-                    jfxUrl("base", "12.0.2")
-            ));
-            put(11, Arrays.asList(
-                    jfxUrl("swing", "11.0.2"),
-                    jfxUrl("media", "11.0.2"),
-                    jfxUrl("fxml", "11.0.2"),
-                    jfxUrl("web", "11.0.2"),
-                    jfxUrl("controls", "11.0.2"),
-                    jfxUrl("graphics", "11.0.2"),
-                    jfxUrl("base", "11.0.2")
-            ));
-        }
-    };
+    private static final String DEFAULT_JFX_VERSION = "16";
+    private static final Map<String, String> JFX_DEPENDENCIES = new HashMap<>();
+
+    static {
+        addJfxDependency("base");
+        addJfxDependency("controls");
+        addJfxDependency("fxml");
+        addJfxDependency("graphics");
+        addJfxDependency("media");
+        addJfxDependency("swing");
+        addJfxDependency("web");
+    }
+
+    private static void addJfxDependency(String name) {
+        JFX_DEPENDENCIES.put("javafx." + name, jfxUrl(name));
+    }
 
     /**
      * Patch in any missing dependencies, if any.
      */
-    public static void runInJavaFxEnvironment(Consumer<ClassLoader> runnable) throws PatchException, IncompatibleVersionException {
-        if (CURRENT_JAVA.getParsedVersion() > 8) {
-            patchReflectionFilters();
-        }
+    public static void patch() throws PatchException, IncompatibleVersionException {
         // Do nothing if JavaFX is detected
         try {
             try {
                 forName("javafx.application.Application");
-                runnable.accept(SelfDependencyPatcher.class.getClassLoader());
+                return;
             } catch (Exception ignored) {
             }
         } catch (UnsupportedClassVersionError error) {
@@ -140,33 +99,12 @@ public class SelfDependencyPatcher {
             loadFromCache();
         } catch (IOException ex) {
             throw new PatchException("Failed to load JavaFX cache", ex);
-        } catch (ReflectiveOperationException ex) {
+        } catch (ReflectiveOperationException | NoClassDefFoundError ex) {
             throw new PatchException("Failed to add dependencies to classpath!", ex);
         }
         LOG.info(" - Done!");
     }
 
-
-//    /**
-//     * Inject them into the current classpath.
-//     *
-//     * @throws IOException                  When the locally cached dependency urls cannot be resolved.
-//     * @throws ReflectiveOperationException When the call to add these urls to the system classpath failed.
-//     */
-//    private static void loadFromCache(Consumer<ClassLoader> runnable) throws IOException, ReflectiveOperationException {
-//        LOG.info(" - Loading dependencies...");
-//        // Get Jar URLs
-//        List<URL> jarUrls = new ArrayList<>();
-//        Files.walk(DEPENDENCIES_DIR_PATH).forEach(path -> {
-//            try {
-//                jarUrls.add(path.toUri().toURL());
-//            } catch (MalformedURLException ex) {
-//                LOG.log(Level.WARNING, "Failed to convert '" + path.toFile().getAbsolutePath() + "' to URL", ex);
-//            }
-//        });
-//        ClassLoader classLoader = new URLClassLoader(jarUrls.toArray(new URL[0]), SelfDependencyPatcher.class.getClassLoader());
-//        runnable.accept(classLoader);
-//    }
     /**
      * Inject them into the current classpath.
      *
@@ -177,32 +115,10 @@ public class SelfDependencyPatcher {
      */
     private static void loadFromCache() throws IOException, ReflectiveOperationException {
         LOG.info(" - Loading dependencies...");
-        // Get Jar URLs
-        List<URL> jarUrls = new ArrayList<>();
-        Files.walk(DEPENDENCIES_DIR_PATH).forEach(path -> {
-            try {
-                jarUrls.add(path.toUri().toURL());
-            } catch(MalformedURLException ex) {
-                LOG.log(Level.WARNING, "Failed to convert '" + path.toFile().getAbsolutePath() + "' to URL", ex);
-            }
-        });
-        // Fetch UCP of application's ClassLoader
-        // - ((ClassLoaders.AppClassLoader) ClassLoaders.appClassLoader()).ucp
-        Class<?> clsClassLoaders = Class.forName("jdk.internal.loader.ClassLoaders");
-        Object appClassLoader = clsClassLoaders.getDeclaredMethod("appClassLoader").invoke(null);
-        Class<?> ucpOwner = appClassLoader.getClass();
-        // Field removed in 16, but still exists in parent class "BuiltinClassLoader"
-        if (CURRENT_JAVA.getParsedVersion() >= 16)
-            ucpOwner = ucpOwner.getSuperclass();
-        Field fieldUCP = ucpOwner.getDeclaredField("ucp");
-        fieldUCP.setAccessible(true);
-        Object ucp = fieldUCP.get(appClassLoader);
-        Class<?> clsUCP = ucp.getClass();
-        Method addURL = clsUCP.getDeclaredMethod("addURL", URL.class);
-        addURL.setAccessible(true);
-        // Add each jar.
-        for(URL url : jarUrls)
-            addURL.invoke(ucp, url);
+        List<Path> jarPaths = new ArrayList<>();
+        List<String> jfxDepFile = JFX_DEPENDENCIES.values().stream().map(SelfDependencyPatcher::getFileName).collect(Collectors.toList());
+        Files.walk(DEPENDENCIES_DIR_PATH).filter(p -> jfxDepFile.contains(p.getFileName().toString())).forEach(jarPaths::add);
+        JavaFXPatcher.patch(JFX_DEPENDENCIES.keySet(), jarPaths.toArray(new Path[0]));
     }
 
     /**
@@ -220,9 +136,9 @@ public class SelfDependencyPatcher {
 
         ForkJoinTask<Void> task = ForkJoinPool.commonPool().submit(() -> {
             // Download each dependency
-            List<String> dependencies = getLatestDependencies();
-            for (int i = 0; i < dependencies.size(); i++) {
-                String dependencyUrlPath = dependencies.get(i);
+            Collection<String> dependencies = JFX_DEPENDENCIES.values();
+            int i = 1;
+            for (String dependencyUrlPath : dependencies) {
                 URL depURL = new URL(dependencyUrlPath);
                 Path dependencyFilePath = DEPENDENCIES_DIR_PATH.resolve(getFileName(dependencyUrlPath));
                 int finalI = i;
@@ -230,14 +146,12 @@ public class SelfDependencyPatcher {
                     dialog.setStatus(dependencyUrlPath);
                     dialog.setProgress(finalI, dependencies.size());
                 });
-                String expectedHash = NetworkUtils.doGet(NetworkUtils.toURL(dependencyUrlPath + ".sha1"));
                 Files.copy(depURL.openStream(), dependencyFilePath, StandardCopyOption.REPLACE_EXISTING);
-                String actualHash = Hex.encodeHex(DigestUtils.digest("SHA-1", dependencyFilePath));
-                if (!expectedHash.equalsIgnoreCase(actualHash)) {
-                    throw new ChecksumMismatchException("SHA-1", expectedHash, actualHash);
-                }
+                checksum(dependencyFilePath, dependencyUrlPath);
+                i++;
             }
 
+            dialog.dispose();
             return null;
         });
 
@@ -250,10 +164,31 @@ public class SelfDependencyPatcher {
      * @return {@code true} when the dependencies directory has files in it.
      */
     private static boolean hasCachedDependencies() {
-        String[] files = DEPENDENCIES_DIR_PATH.toFile().list();
-        if (files == null)
+        if (!Files.isDirectory(DEPENDENCIES_DIR_PATH))
             return false;
-        return files.length >= getLatestDependencies().size();
+
+        for (String url : JFX_DEPENDENCIES.values()) {
+            Path dependencyFilePath = DEPENDENCIES_DIR_PATH.resolve(getFileName(url));
+            if (!Files.exists(dependencyFilePath))
+                return false;
+
+            try {
+                checksum(dependencyFilePath, url);
+            } catch (ChecksumMismatchException e) {
+                return false;
+            } catch (IOException ignored) {
+                // Ignore other situations
+            }
+        }
+        return true;
+    }
+
+    private static void checksum(Path dependencyFilePath, String dependencyUrlPath) throws IOException {
+        String expectedHash = NetworkUtils.doGet(NetworkUtils.toURL(dependencyUrlPath + ".sha1"));
+        String actualHash = Hex.encodeHex(DigestUtils.digest("SHA-1", dependencyFilePath));
+        if (!expectedHash.equalsIgnoreCase(actualHash)) {
+            throw new ChecksumMismatchException("SHA-1", expectedHash, actualHash);
+        }
     }
 
     /**
@@ -268,37 +203,16 @@ public class SelfDependencyPatcher {
      * @param component Name of the component.
      * @return Formed URL for the component.
      */
+    private static String jfxUrl(String component) {
+        return jfxUrl(component, DEFAULT_JFX_VERSION);
+    }
+
     private static String jfxUrl(String component, String version) {
         // https://repo1.maven.org/maven2/org/openjfx/javafx-%s/%s/javafx-%s-%s-%s.jar
         return String.format("https://maven.aliyun.com/repository/central/org/openjfx/javafx-%s/%s/javafx-%s-%s-%s.jar",
                 component, version, component, version, getMvnName());
 //        return String.format("https://bmclapi.bangbang93.com/maven/org/openjfx/javafx-%s/%s/javafx-%s-%s-%s.jar",
 //                component, version, component, version, getMvnName());
-    }
-
-    /**
-     * @return Latest JavaFX supported version for.
-     */
-    private static int getLatestSupportedJfxVersion() {
-        int version = CURRENT_JAVA.getParsedVersion();
-        while (version >= 11) {
-            List<String> dependencies = JFX_DEPENDENCIES.get(version);
-            if (dependencies != null)
-                return version;
-            version--;
-        }
-        throw new AssertionError("Failed to get latest supported JFX version");
-    }
-
-    /**
-     * @return JavaFX dependencies list for the current VM version.
-     */
-    private static List<String> getLatestDependencies() {
-        int version = getLatestSupportedJfxVersion();
-        if (version >= 11) {
-            return JFX_DEPENDENCIES.get(version);
-        }
-        throw new AssertionError("Failed to get latest JFX artifact urls");
     }
 
     private static String getMvnName() {
@@ -309,51 +223,6 @@ public class SelfDependencyPatcher {
                 return "mac";
             default:
                 return "win";
-        }
-    }
-
-    /**
-     * Patches reflection filters.
-     */
-    private static void patchReflectionFilters() {
-        Class<?> klass;
-        try {
-            klass = Class.forName("jdk.internal.reflect.Reflection",
-                    true, null);
-        } catch (ClassNotFoundException ex) {
-            throw new RuntimeException("Unable to locate 'jdk.internal.reflect.Reflection' class", ex);
-        }
-        try {
-            Field[] fields;
-            try {
-                Method m = Class.class.getDeclaredMethod("getDeclaredFieldsImpl");
-                ReflectionHelper.setAccessible(m);
-                fields = (Field[]) m.invoke(klass);
-            } catch (NoSuchMethodException | InvocationTargetException ex) {
-                try {
-                    Method m = Class.class.getDeclaredMethod("getDeclaredFields0", Boolean.TYPE);
-                    ReflectionHelper.setAccessible(m);
-                    fields = (Field[]) m.invoke(klass, false);
-                } catch (InvocationTargetException | NoSuchMethodException ex1) {
-                    ex.addSuppressed(ex1);
-                    throw new RuntimeException("Unable to get all class fields", ex);
-                }
-            }
-            int c = 0;
-            for (Field field : fields) {
-                String name = field.getName();
-                if ("fieldFilterMap".equals(name) || "methodFilterMap".equals(name)) {
-                    ReflectionHelper.setAccessible(field);
-                    field.set(null, new HashMap<>(0));
-                    if (++c == 2) {
-                        return;
-                    }
-                }
-            }
-            throw new RuntimeException("One of field patches did not apply properly. " +
-                    "Expected to patch two fields, but patched: " + c);
-        } catch (IllegalAccessException | InvocationTargetException ex) {
-            throw new RuntimeException("Unable to patch reflection filters", ex);
         }
     }
 
@@ -374,7 +243,7 @@ public class SelfDependencyPatcher {
         private final JLabel progressText;
 
         public ProgressFrame(String title) {
-            super();
+            super((Dialog) null);
 
             JPanel panel = new JPanel();
 
