@@ -99,7 +99,7 @@ public class DefaultLauncher extends Launcher {
                 res.add("-Duser.home=" + options.getGameDir().getParent());
 
             // Force using G1GC with its settings
-            if (options.getJava().getParsedVersion() >= JavaVersion.JAVA_7) {
+            if (options.getJava().getParsedVersion() >= JavaVersion.JAVA_8) {
                 res.add("-XX:+UnlockExperimentalVMOptions");
                 res.add("-XX:+UseG1GC");
                 res.add("-XX:G1NewSizePercent=20");
@@ -129,6 +129,9 @@ public class DefaultLauncher extends Launcher {
 
             if (options.getMinMemory() != null && options.getMinMemory() > 0)
                 res.add("-Xms" + options.getMinMemory() + "m");
+
+            if (options.getJava().getParsedVersion() >= JavaVersion.JAVA_16)
+                res.add("--illegal-access=permit");
 
             res.add("-Dfml.ignoreInvalidMinecraftCertificates=true");
             res.add("-Dfml.ignorePatchDiscrepancies=true");
@@ -300,6 +303,10 @@ public class DefaultLauncher extends Launcher {
 
         // To guarantee that when failed to generate launch command line, we will not call pre-launch command
         List<String> rawCommandLine = generateCommandLine(nativeFolder).asList();
+
+        if (rawCommandLine.stream().anyMatch(StringUtils::isBlank)) {
+            throw new IllegalStateException("Illegal command line " + rawCommandLine);
+        }
 
         decompressNatives(nativeFolder);
 

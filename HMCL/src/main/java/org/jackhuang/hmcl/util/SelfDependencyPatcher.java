@@ -40,7 +40,8 @@ public class SelfDependencyPatcher {
         addJfxDependency("fxml");
         addJfxDependency("graphics");
         addJfxDependency("media");
-        addJfxDependency("swing");
+        // Fix #874: Remove the dependency on javafx.swing
+        // addJfxDependency("swing");
         addJfxDependency("web");
     }
 
@@ -73,9 +74,11 @@ public class SelfDependencyPatcher {
 
         // We can only self-patch JavaFX on x86 platform.
         // For ARM support, user's manual patch is required.
-        switch (System.getProperty("os.arch")) {
+        switch (System.getProperty("os.arch", "unknown").toLowerCase()) {
             case "amd64":
-            case "x86":
+            case "x64":
+            case "x86-64":
+            case "x86_64":
                 break;
             default:
                 throw new IncompatibleVersionException();
