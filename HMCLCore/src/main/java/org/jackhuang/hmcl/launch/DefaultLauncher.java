@@ -23,6 +23,7 @@ import org.jackhuang.hmcl.game.Arguments;
 import org.jackhuang.hmcl.game.GameRepository;
 import org.jackhuang.hmcl.game.LaunchOptions;
 import org.jackhuang.hmcl.game.Library;
+import org.jackhuang.hmcl.game.NativesDirectoryType;
 import org.jackhuang.hmcl.game.Version;
 import org.jackhuang.hmcl.util.Lang;
 import org.jackhuang.hmcl.util.Log4jLevel;
@@ -299,7 +300,12 @@ public class DefaultLauncher extends Launcher {
 
     @Override
     public ManagedProcess launch() throws IOException, InterruptedException {
-        File nativeFolder = repository.getNativeDirectory(version.getId());
+        File nativeFolder = null;
+        if (options.getNativesDirType() == NativesDirectoryType.VERSION_FOLDER) {
+            nativeFolder = repository.getNativeDirectory(version.getId());
+        } else {
+            nativeFolder = new File(options.getNativesDir());
+        }
 
         // To guarantee that when failed to generate launch command line, we will not call pre-launch command
         List<String> rawCommandLine = generateCommandLine(nativeFolder).asList();
@@ -308,7 +314,9 @@ public class DefaultLauncher extends Launcher {
             throw new IllegalStateException("Illegal command line " + rawCommandLine);
         }
 
-        decompressNatives(nativeFolder);
+        if (options.getNativesDirType() == NativesDirectoryType.VERSION_FOLDER) {
+            decompressNatives(nativeFolder);
+        }
 
         File runDirectory = repository.getRunDirectory(version.getId());
 
@@ -348,8 +356,16 @@ public class DefaultLauncher extends Launcher {
     public void makeLaunchScript(File scriptFile) throws IOException {
         boolean isWindows = OperatingSystem.WINDOWS == OperatingSystem.CURRENT_OS;
 
-        File nativeFolder = repository.getNativeDirectory(version.getId());
-        decompressNatives(nativeFolder);
+        File nativeFolder = null;
+        if (options.getNativesDirType() == NativesDirectoryType.VERSION_FOLDER) {
+            nativeFolder = repository.getNativeDirectory(version.getId());
+        } else {
+            nativeFolder = new File(options.getNativesDir());
+        }
+
+        if (options.getNativesDirType() == NativesDirectoryType.VERSION_FOLDER) {
+            decompressNatives(nativeFolder);
+        }
 
         if (isWindows && !FileUtils.getExtension(scriptFile).equals("bat"))
             throw new IllegalArgumentException("The extension of " + scriptFile + " is not 'bat' in Windows");

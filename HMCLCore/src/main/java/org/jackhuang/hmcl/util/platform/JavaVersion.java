@@ -28,9 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.logging.Level;
@@ -38,7 +36,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
-import static java.util.Collections.unmodifiableList;
 import static java.util.stream.Collectors.toList;
 import static org.jackhuang.hmcl.util.Logging.LOG;
 
@@ -144,7 +141,7 @@ public final class JavaVersion {
         return javaVersion;
     }
 
-    private static Path getExecutable(Path javaHome) {
+    public static Path getExecutable(Path javaHome) {
         if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
             return javaHome.resolve("bin").resolve("java.exe");
         } else {
@@ -171,10 +168,10 @@ public final class JavaVersion {
                 Platform.PLATFORM);
     }
 
-    private static List<JavaVersion> JAVAS;
+    private static Collection<JavaVersion> JAVAS;
     private static final CountDownLatch LATCH = new CountDownLatch(1);
 
-    public static List<JavaVersion> getJavas() throws InterruptedException {
+    public static Collection<JavaVersion> getJavas() throws InterruptedException {
         if (JAVAS != null)
             return JAVAS;
         LATCH.await();
@@ -187,7 +184,7 @@ public final class JavaVersion {
 
         List<JavaVersion> javaVersions;
 
-        try (Stream<Path> stream = searchPotentialJavaHomes()) {
+        try (Stream<Path> stream = searchPotentialJavaExecutables()) {
             javaVersions = lookupJavas(stream);
         } catch (IOException e) {
             LOG.log(Level.WARNING, "Failed to search Java homes", e);
@@ -199,14 +196,13 @@ public final class JavaVersion {
             javaVersions.add(CURRENT_JAVA);
         }
 
-        JAVAS = unmodifiableList(javaVersions);
+        JAVAS = Collections.newSetFromMap(new ConcurrentHashMap<>());
+        JAVAS.addAll(javaVersions);
         LATCH.countDown();
     }
 
-    private static List<JavaVersion> lookupJavas(Stream<Path> javaHomes) {
-        return javaHomes
-                .filter(Files::isDirectory)
-                .map(JavaVersion::getExecutable)
+    private static List<JavaVersion> lookupJavas(Stream<Path> javaExecutables) {
+        return javaExecutables
                 .filter(Files::isExecutable)
                 .flatMap(executable -> { // resolve symbolic links
                     try {
@@ -231,34 +227,73 @@ public final class JavaVersion {
                 .collect(toList());
     }
 
-    private static Stream<Path> searchPotentialJavaHomes() throws IOException {
+    private static Stream<Path> searchPotentialJavaExecutables() throws IOException {
+        List<Stream<Path>> javaExecutables = new ArrayList<>();
         switch (OperatingSystem.CURRENT_OS) {
 
             case WINDOWS:
-                List<Path> locations = new ArrayList<>();
-                locations.addAll(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\Java Runtime Environment\\"));
-                locations.addAll(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\Java Development Kit\\"));
-                locations.addAll(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\JRE\\"));
-                locations.addAll(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\JDK\\"));
-                return locations.stream();
+                javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\Java Runtime Environment\\").stream().map(JavaVersion::getExecutable));
+                javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\Java Development Kit\\").stream().map(JavaVersion::getExecutable));
+                javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\JRE\\").stream().map(JavaVersion::getExecutable));
+                javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\JDK\\").stream().map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\Java")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\BellSoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\AdoptOpenJDK")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\Zulu")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\Microsoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\Java")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\BellSoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\AdoptOpenJDK")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\Zulu")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\Microsoft")).map(JavaVersion::getExecutable));
+                if (System.getenv("PATH") != null) {
+                    javaExecutables.add(Arrays.stream(System.getenv("PATH").split(";")).map(path -> Paths.get(path, "java.exe")));
+                }
+                if (System.getenv("HMCL_JRES") != null) {
+                    javaExecutables.add(Arrays.stream(System.getenv("HMCL_JRES").split(";")).map(path -> Paths.get(path, "java.exe")));
+                }
+                break;
 
             case LINUX:
-                Path linuxJvmDir = Paths.get("/usr/lib/jvm");
-                if (Files.isDirectory(linuxJvmDir)) {
-                    return Files.list(linuxJvmDir);
+                javaExecutables.add(listDirectory(Paths.get("/usr/java")).map(JavaVersion::getExecutable)); // Oracle RPMs
+                javaExecutables.add(listDirectory(Paths.get("/usr/lib/jvm")).map(JavaVersion::getExecutable)); // General locations
+                javaExecutables.add(listDirectory(Paths.get("/usr/lib32/jvm")).map(JavaVersion::getExecutable)); // General locations
+                if (System.getenv("PATH") != null) {
+                    javaExecutables.add(Arrays.stream(System.getenv("PATH").split(":")).map(path -> Paths.get(path, "java")));
                 }
-                return Stream.empty();
+                if (System.getenv("HMCL_JRES") != null) {
+                    javaExecutables.add(Arrays.stream(System.getenv("HMCL_JRES").split(":")).map(path -> Paths.get(path, "java")));
+                }
+                break;
 
             case OSX:
-                Path osxJvmDir = Paths.get("/Library/Java/JavaVirtualMachines");
-                if (Files.isDirectory(osxJvmDir)) {
-                    return Files.list(osxJvmDir)
-                            .map(dir -> dir.resolve("Contents/Home"));
+                javaExecutables.add(listDirectory(Paths.get("/Library/Java/JavaVirtualMachines"))
+                        .flatMap(dir -> Stream.of(dir.resolve("Contents/Home"), dir.resolve("Contents/Home/jre")))
+                        .map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(Paths.get("/System/Library/Java/JavaVirtualMachines"))
+                        .map(dir -> dir.resolve("Contents/Home"))
+                        .map(JavaVersion::getExecutable));
+                javaExecutables.add(Stream.of(Paths.get("/Library/Internet Plug-Ins/JavaAppletPlugin.plugin/Contents/Home/bin/java")));
+                javaExecutables.add(Stream.of(Paths.get("/Applications/Xcode.app/Contents/Applications/Application Loader.app/Contents/MacOS/itms/java/bin/java")));
+                if (System.getenv("PATH") != null) {
+                    javaExecutables.add(Arrays.stream(System.getenv("PATH").split(":")).map(path -> Paths.get(path, "java")));
                 }
-                return Stream.empty();
+                if (System.getenv("HMCL_JRES") != null) {
+                    javaExecutables.add(Arrays.stream(System.getenv("HMCL_JRES").split(":")).map(path -> Paths.get(path, "java")));
+                }
+                break;
 
             default:
-                return Stream.empty();
+                break;
+        }
+        return javaExecutables.stream().flatMap(stream -> stream);
+    }
+
+    private static Stream<Path> listDirectory(Path directory) throws IOException {
+        if (Files.isDirectory(directory)) {
+            return Files.list(directory);
+        } else {
+            return Stream.empty();
         }
     }
 
