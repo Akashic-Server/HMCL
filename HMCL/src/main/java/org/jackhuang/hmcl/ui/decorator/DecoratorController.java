@@ -61,16 +61,17 @@ import java.util.Random;
 import java.util.logging.Level;
 import java.util.stream.Stream;
 
+import static java.util.logging.Level.WARNING;
 import static java.util.stream.Collectors.toList;
 import static org.jackhuang.hmcl.setting.ConfigHolder.config;
 import static org.jackhuang.hmcl.ui.FXUtils.newImage;
 import static org.jackhuang.hmcl.util.Logging.LOG;
+import static org.jackhuang.hmcl.util.io.FileUtils.getExtension;
 
 public class DecoratorController {
     private static final String PROPERTY_DIALOG_CLOSE_HANDLER = DecoratorController.class.getName() + ".dialog.closeListener";
 
     private final Decorator decorator;
-    private final ImageView welcomeView;
     private final Navigator navigator;
 
     private JFXDialog dialog;
@@ -89,23 +90,22 @@ public class DecoratorController {
         decorator.onBackNavButtonActionProperty().set(e -> back());
         decorator.onRefreshNavButtonActionProperty().set(e -> refresh());
 
-        welcomeView = new ImageView();
-        welcomeView.setImage(newImage("/assets/img/welcome.png"));
-        welcomeView.setCursor(Cursor.HAND);
-        FXUtils.limitSize(welcomeView, 796, 517);
-        welcomeView.setOnMouseClicked(e -> {
-            Timeline nowAnimation = new Timeline();
-            nowAnimation.getKeyFrames().addAll(
-                    new KeyFrame(Duration.ZERO, new KeyValue(welcomeView.opacityProperty(), 1.0D, Interpolator.EASE_BOTH)),
-                    new KeyFrame(new Duration(300), new KeyValue(welcomeView.opacityProperty(), 0.0D, Interpolator.EASE_BOTH)),
-                    new KeyFrame(new Duration(300), e2 -> decorator.getContainer().remove(welcomeView))
-            );
-            nowAnimation.play();
-        });
-
         if (switchedToNewUI()) {
             if (config().getLocalization().getLocale() == Locale.CHINA) {
                 // currently, user guide is only available in Chinese
+                ImageView welcomeView = new ImageView();
+                welcomeView.setImage(newImage("/assets/img/welcome.png"));
+                welcomeView.setCursor(Cursor.HAND);
+                FXUtils.limitSize(welcomeView, 796, 517);
+                welcomeView.setOnMouseClicked(e -> {
+                    Timeline nowAnimation = new Timeline();
+                    nowAnimation.getKeyFrames().addAll(
+                            new KeyFrame(Duration.ZERO, new KeyValue(welcomeView.opacityProperty(), 1.0D, Interpolator.EASE_BOTH)),
+                            new KeyFrame(new Duration(300), new KeyValue(welcomeView.opacityProperty(), 0.0D, Interpolator.EASE_BOTH)),
+                            new KeyFrame(new Duration(300), e2 -> decorator.getContainer().remove(welcomeView))
+                    );
+                    nowAnimation.play();
+                });
                 decorator.getContainer().setAll(welcomeView);
             }
         }
@@ -174,10 +174,10 @@ public class DecoratorController {
         List<Path> candidates;
         try (Stream<Path> stream = Files.list(imageDir)) {
             candidates = stream
-                .filter(Files::isRegularFile)
+                .filter(Files::isReadable)
                     .filter(it -> {
-                        String filename = it.getFileName().toString();
-                        return filename.endsWith(".png") || filename.endsWith(".jpg");
+                        String ext = getExtension(it).toLowerCase();
+                        return ext.equals("png") || ext.equals("jpg");
                     })
                     .collect(toList());
         } catch (IOException e) {
@@ -199,13 +199,23 @@ public class DecoratorController {
     }
 
     private Optional<Image> tryLoadImage(Path path) {
-        if (Files.isRegularFile(path)) {
-            try {
-                return Optional.of(new Image(path.toAbsolutePath().toUri().toString()));
-            } catch (IllegalArgumentException ignored) {
-            }
+        if (!Files.isReadable(path))
+            return Optional.empty();
+
+        Image img;
+        try {
+            img = new Image(path.toAbsolutePath().toUri().toString());
+        } catch (IllegalArgumentException e) {
+            LOG.log(WARNING, "Couldn't load background image", e);
+            return Optional.empty();
         }
-        return Optional.empty();
+
+        if (img.getException() != null) {
+            LOG.log(WARNING, "Couldn't load background image", img.getException());
+            return Optional.empty();
+        }
+
+        return Optional.of(img);
     }
 
     // ==== Navigation ====
