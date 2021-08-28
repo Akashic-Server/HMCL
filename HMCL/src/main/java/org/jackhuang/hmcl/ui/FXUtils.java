@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +24,8 @@ import javafx.animation.KeyValue;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
+import javafx.beans.Observable;
+import javafx.beans.WeakInvalidationListener;
 import javafx.beans.property.Property;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
@@ -36,6 +38,10 @@ import javafx.scene.Node;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelWriter;
+import javafx.scene.image.WritableImage;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
@@ -51,6 +57,7 @@ import org.jackhuang.hmcl.util.javafx.ExtendedProperties;
 import org.jackhuang.hmcl.util.javafx.SafeStringConverter;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.IOException;
@@ -110,6 +117,16 @@ public final class FXUtils {
     public static <T> WeakChangeListener<T> onWeakChangeAndOperate(ObservableValue<T> value, Consumer<T> consumer) {
         consumer.accept(value.getValue());
         return onWeakChange(value, consumer);
+    }
+
+    public static InvalidationListener observeWeak(Runnable runnable, Observable... observables) {
+        InvalidationListener originalListener = observable -> runnable.run();
+        WeakInvalidationListener listener = new WeakInvalidationListener(originalListener);
+        for (Observable observable : observables) {
+            observable.addListener(listener);
+        }
+        runnable.run();
+        return originalListener;
     }
 
     public static void runLaterIf(BooleanSupplier condition, Runnable runnable) {
@@ -528,5 +545,30 @@ public final class FXUtils {
             runnable.run();
             popup.hide();
         };
+    }
+
+    public static void onEscPressed(Node node, Runnable action) {
+        node.addEventHandler(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.ESCAPE) {
+                action.run();
+                e.consume();
+            }
+        });
+    }
+
+    // Based on https://stackoverflow.com/a/57552025
+    // Fix #874: Use it instead of SwingFXUtils.toFXImage
+    public static WritableImage toFXImage(BufferedImage image) {
+        WritableImage wr = new WritableImage(image.getWidth(), image.getHeight());
+        PixelWriter pw = wr.getPixelWriter();
+
+        final int iw = image.getWidth();
+        final int ih = image.getHeight();
+        for (int x = 0; x < iw; x++) {
+            for (int y = 0; y < ih; y++) {
+                pw.setArgb(x, y, image.getRGB(x, y));
+            }
+        }
+        return wr;
     }
 }

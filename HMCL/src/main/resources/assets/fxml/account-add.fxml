@@ -23,12 +23,9 @@
                     <ColumnConstraints minWidth="140"/>
                 </columnConstraints>
 
-                <Label text="%account.methods" GridPane.halignment="RIGHT" GridPane.columnIndex="0"
-                       GridPane.rowIndex="0"/>
+                <StackPane fx:id="tabHeaderPane" GridPane.columnIndex="0" GridPane.columnSpan="3" GridPane.rowIndex="0" />
 
-                <JFXComboBox fx:id="cboType" GridPane.columnIndex="1" GridPane.rowIndex="0" GridPane.columnSpan="2"/>
-
-                <Label fx:id="lblInjectorServer" text="%account.injector.server" GridPane.halignment="RIGHT"
+                <Label fx:id="lblInjectorServer" text="%account.injector.server" GridPane.halignment="LEFT"
                        GridPane.columnIndex="0" GridPane.rowIndex="1"/>
 
                 <JFXComboBox fx:id="cboServers" promptText="%account.injector.empty" maxHeight="25" GridPane.columnIndex="1" GridPane.rowIndex="1"/>
@@ -47,23 +44,21 @@
                     </JFXButton>
                 </HBox>
 
-                <Label fx:id="lblUsername" text="%account.username" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                <Label fx:id="lblUsername" text="%account.username" GridPane.halignment="LEFT" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
 
                 <JFXTextField fx:id="txtUsername" GridPane.columnIndex="1" GridPane.rowIndex="2" GridPane.columnSpan="2"
                               FXUtils.validateWhileTextChanged="true" onAction="#onCreationAccept">
                     <validators>
-                        <RequiredValidator message="%input.not_empty">
-                        </RequiredValidator>
+                        <RequiredValidator />
                     </validators>
                 </JFXTextField>
 
-                <Label fx:id="lblPassword" text="%account.password" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                <Label fx:id="lblPassword" text="%account.password" GridPane.halignment="LEFT" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
 
                 <JFXPasswordField fx:id="txtPassword" GridPane.columnIndex="1" GridPane.rowIndex="3"
                                   GridPane.columnSpan="2" FXUtils.validateWhileTextChanged="true" onAction="#onCreationAccept">
                     <validators>
-                        <RequiredFieldValidator message="%input.not_empty">
-                        </RequiredFieldValidator>
+                        <RequiredFieldValidator />
                     </validators>
                 </JFXPasswordField>
             </GridPane>

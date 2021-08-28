@@ -17,15 +17,13 @@
  */
 package org.jackhuang.hmcl.ui.main;
 
-import com.jfoenix.controls.JFXColorPicker;
 import com.jfoenix.effects.JFXDepthManager;
 import javafx.application.Platform;
 import javafx.beans.InvalidationListener;
 import javafx.beans.WeakInvalidationListener;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.When;
-import javafx.beans.property.ReadOnlyObjectProperty;
-import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.scene.control.ColorPicker;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -35,7 +33,6 @@ import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.construct.MessageDialogPane.MessageType;
 import org.jackhuang.hmcl.ui.construct.Validator;
-import org.jackhuang.hmcl.ui.decorator.DecoratorPage;
 import org.jackhuang.hmcl.upgrade.RemoteVersion;
 import org.jackhuang.hmcl.upgrade.UpdateChannel;
 import org.jackhuang.hmcl.upgrade.UpdateChecker;
@@ -65,8 +62,7 @@ import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 import static org.jackhuang.hmcl.util.javafx.ExtendedProperties.reversedSelectedPropertyFor;
 import static org.jackhuang.hmcl.util.javafx.ExtendedProperties.selectedItemPropertyFor;
 
-public final class SettingsPage extends SettingsView implements DecoratorPage {
-    private final ReadOnlyObjectWrapper<State> state = new ReadOnlyObjectWrapper<>(State.fromTitle(i18n("settings.launcher")));
+public final class SettingsPage extends SettingsView {
 
     private InvalidationListener updateListener;
 
@@ -87,7 +83,19 @@ public final class SettingsPage extends SettingsView implements DecoratorPage {
                         .fallbackTo(12.0)
                         .asPredicate(Validator.addTo(txtFontSize)));
 
-        lblDisplay.fontProperty().bind(Bindings.createObjectBinding(
+        lblFontDisplay.fontProperty().bind(Bindings.createObjectBinding(
+                () -> Font.font(config().getFontFamily(), config().getFontSize()),
+                config().fontFamilyProperty(), config().fontSizeProperty()));
+
+        cboLogFont.valueProperty().bindBidirectional(config().fontFamilyProperty());
+
+        txtLogFontSize.textProperty().bindBidirectional(config().fontSizeProperty(),
+                SafeStringConverter.fromFiniteDouble()
+                        .restrict(it -> it > 0)
+                        .fallbackTo(12.0)
+                        .asPredicate(Validator.addTo(txtLogFontSize)));
+
+        lblLogFontDisplay.fontProperty().bind(Bindings.createObjectBinding(
                 () -> Font.font(config().getFontFamily(), config().getFontSize()),
                 config().fontFamilyProperty(), config().fontSizeProperty()));
         // ====
@@ -184,9 +192,7 @@ public final class SettingsPage extends SettingsView implements DecoratorPage {
         // ====
 
         // ==== Theme ====
-        JFXColorPicker picker = new JFXColorPicker(Color.web(config().getTheme().getColor()), null);
-        picker.setCustomColorText(i18n("color.custom"));
-        picker.setRecentColorsText(i18n("color.recent"));
+        ColorPicker picker = new ColorPicker(Color.web(config().getTheme().getColor()));
         picker.getCustomColors().setAll(Theme.SUGGESTED_COLORS);
         picker.setOnAction(e -> {
             Theme theme = Theme.custom(Theme.getColorDisplayName(picker.getValue()));
@@ -196,11 +202,6 @@ public final class SettingsPage extends SettingsView implements DecoratorPage {
         themeColorPickerContainer.getChildren().setAll(picker);
         Platform.runLater(() -> JFXDepthManager.setDepth(picker, 0));
         // ====
-    }
-
-    @Override
-    public ReadOnlyObjectProperty<State> stateProperty() {
-        return state.getReadOnlyProperty();
     }
 
     @Override

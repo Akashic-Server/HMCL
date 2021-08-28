@@ -18,18 +18,22 @@
 package org.jackhuang.hmcl.util.io;
 
 import com.google.gson.JsonParseException;
+import org.jackhuang.hmcl.util.Pair;
 import org.jackhuang.hmcl.util.function.ExceptionalBiConsumer;
 import org.jackhuang.hmcl.util.gson.JsonUtils;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.Type;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.jackhuang.hmcl.util.Lang.mapOf;
 import static org.jackhuang.hmcl.util.gson.JsonUtils.GSON;
 import static org.jackhuang.hmcl.util.io.NetworkUtils.createHttpConnection;
 import static org.jackhuang.hmcl.util.io.NetworkUtils.resolveConnection;
@@ -68,12 +72,16 @@ public abstract class HttpRequest {
         return JsonUtils.fromNonNullJson(getString(), typeOfT);
     }
 
+    public <T> T getJson(Type type) throws IOException, JsonParseException {
+        return JsonUtils.fromNonNullJson(getString(), type);
+    }
+
     public HttpRequest filter(ExceptionalBiConsumer<URL, Integer, IOException> responseCodeTester) {
         this.responseCodeTester = responseCodeTester;
         return this;
     }
 
-    protected HttpURLConnection createConnection() throws IOException {
+    public HttpURLConnection createConnection() throws IOException {
         HttpURLConnection con = createHttpConnection(url);
         con.setRequestMethod(method);
         for (Map.Entry<String, String> entry : headers.entrySet()) {
@@ -90,24 +98,28 @@ public abstract class HttpRequest {
         public String getString() throws IOException {
             HttpURLConnection con = createConnection();
             con = resolveConnection(con);
-            return IOUtils.readFullyAsString(con.getInputStream());
+            return IOUtils.readFullyAsString(con.getInputStream(), StandardCharsets.UTF_8);
         }
     }
 
-    public static class HttpPostRequest extends HttpRequest {
+    public static final class HttpPostRequest extends HttpRequest {
         private byte[] bytes;
 
         public HttpPostRequest(URL url) {
             super(url, "POST");
         }
 
-        public <T> HttpPostRequest json(Object payload) throws JsonParseException {
-            return string(payload instanceof String ? (String) payload : GSON.toJson(payload),
-                    "application/json");
+        public HttpPostRequest json(Object payload) throws JsonParseException {
+            return string(payload instanceof String ? (String) payload : GSON.toJson(payload), "application/json");
         }
 
         public HttpPostRequest form(Map<String, String> params) {
             return string(NetworkUtils.withQuery("", params), "application/x-www-form-urlencoded");
+        }
+
+        @SafeVarargs
+        public final HttpPostRequest form(Pair<String, String>... params) {
+            return form(mapOf(params));
         }
 
         public HttpPostRequest string(String payload, String contentType) {
@@ -134,6 +146,11 @@ public abstract class HttpRequest {
 
     public static HttpGetRequest GET(String url) throws MalformedURLException {
         return GET(new URL(url));
+    }
+
+    @SafeVarargs
+    public static HttpGetRequest GET(String url, Pair<String, String>... query) throws MalformedURLException {
+        return GET(new URL(NetworkUtils.withQuery(url, mapOf(query))));
     }
 
     public static HttpGetRequest GET(URL url) {

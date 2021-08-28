@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,6 +21,7 @@ import javafx.beans.property.DoubleProperty;
 import javafx.beans.property.SimpleDoubleProperty;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.ButtonBase;
 import javafx.scene.layout.Region;
 import javafx.scene.paint.Color;
 import javafx.stage.Stage;
@@ -28,11 +29,12 @@ import javafx.stage.StageStyle;
 import org.jackhuang.hmcl.Launcher;
 import org.jackhuang.hmcl.Metadata;
 import org.jackhuang.hmcl.download.java.JavaRepository;
+import org.jackhuang.hmcl.mod.curse.CurseModManager;
 import org.jackhuang.hmcl.setting.EnumCommonDirectory;
+import org.jackhuang.hmcl.setting.Profiles;
 import org.jackhuang.hmcl.task.Task;
 import org.jackhuang.hmcl.task.TaskExecutor;
 import org.jackhuang.hmcl.ui.account.AuthlibInjectorServersPage;
-import org.jackhuang.hmcl.ui.account.MicrosoftAccountLoginStage;
 import org.jackhuang.hmcl.ui.animation.ContainerAnimations;
 import org.jackhuang.hmcl.ui.construct.InputDialogPane;
 import org.jackhuang.hmcl.ui.construct.MessageDialogPane;
@@ -40,13 +42,20 @@ import org.jackhuang.hmcl.ui.construct.MessageDialogPane.MessageType;
 import org.jackhuang.hmcl.ui.construct.PromptDialogPane;
 import org.jackhuang.hmcl.ui.construct.TaskExecutorDialogPane;
 import org.jackhuang.hmcl.ui.decorator.DecoratorController;
+import org.jackhuang.hmcl.ui.download.ModpackInstallWizardProvider;
+import org.jackhuang.hmcl.ui.main.LauncherSettingsPage;
 import org.jackhuang.hmcl.ui.main.RootPage;
+import org.jackhuang.hmcl.ui.versions.GameListPage;
+import org.jackhuang.hmcl.ui.versions.ModDownloadListPage;
 import org.jackhuang.hmcl.ui.versions.VersionPage;
+import org.jackhuang.hmcl.ui.versions.Versions;
 import org.jackhuang.hmcl.util.FutureCallback;
+import org.jackhuang.hmcl.util.Lazy;
 import org.jackhuang.hmcl.util.Logging;
 import org.jackhuang.hmcl.util.io.FileUtils;
 import org.jackhuang.hmcl.util.platform.JavaVersion;
 
+import java.io.File;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
@@ -61,10 +70,28 @@ public final class Controllers {
 
     private static Scene scene;
     private static Stage stage;
-    private static VersionPage versionPage = null;
+    private static Lazy<VersionPage> versionPage = new Lazy<>(VersionPage::new);
+    private static Lazy<GameListPage> gameListPage = new Lazy<>(() -> {
+        GameListPage gameListPage = new GameListPage();
+        gameListPage.selectedProfileProperty().bindBidirectional(Profiles.selectedProfileProperty());
+        gameListPage.profilesProperty().bindContent(Profiles.profilesProperty());
+        FXUtils.applyDragListener(gameListPage, it -> "zip".equals(FileUtils.getExtension(it)), modpacks -> {
+            File modpack = modpacks.get(0);
+            Controllers.getDecorator().startWizard(new ModpackInstallWizardProvider(Profiles.getSelectedProfile(), modpack), i18n("install.modpack"));
+        });
+        return gameListPage;
+    });
     private static AuthlibInjectorServersPage serversPage = null;
-    private static RootPage rootPage;
+    private static Lazy<RootPage> rootPage = new Lazy<>(RootPage::new);
     private static DecoratorController decorator;
+    private static Lazy<ModDownloadListPage> modDownloadListPage = new Lazy<>(() -> {
+        return new ModDownloadListPage(CurseModManager.SECTION_MODPACK, Versions::downloadModpackImpl) {
+            {
+                state.set(State.fromTitle(i18n("modpack.download")));
+            }
+        };
+    });
+    private static Lazy<LauncherSettingsPage> settingsPage = new Lazy<>(LauncherSettingsPage::new);
 
     private Controllers() {
     }
@@ -79,16 +106,17 @@ public final class Controllers {
 
     // FXThread
     public static VersionPage getVersionPage() {
-        if (versionPage == null)
-            versionPage = new VersionPage();
-        return versionPage;
+        return versionPage.get();
+    }
+
+    // FXThread
+    public static GameListPage getGameListPage() {
+        return gameListPage.get();
     }
 
     // FXThread
     public static RootPage getRootPage() {
-        if (rootPage == null)
-            rootPage = new RootPage();
-        return rootPage;
+        return rootPage.get();
     }
 
     // FXThread
@@ -99,6 +127,16 @@ public final class Controllers {
     }
 
     // FXThread
+    public static ModDownloadListPage getModpackDownloadListPage() {
+        return modDownloadListPage.get();
+    }
+
+    // FXThread
+    public static LauncherSettingsPage getSettingsPage() {
+        return settingsPage.get();
+    }
+
+    // FXThread
     public static DecoratorController getDecorator() {
         return decorator;
     }
@@ -106,13 +144,14 @@ public final class Controllers {
     public static void onApplicationStop() {
         config().setHeight(stageHeight.get());
         config().setWidth(stageWidth.get());
+        stageHeight = null;
+        stageWidth = null;
     }
 
     public static void initialize(Stage stage) {
         Logging.LOG.info("Start initializing application");
 
         Controllers.stage = stage;
-        MicrosoftAccountLoginStage.INSTANCE.initOwner(stage);
 
         stage.setHeight(config().getHeight());
         stageHeight.bind(stage.heightProperty());
@@ -162,12 +201,24 @@ public final class Controllers {
         dialog(text, title, type, null);
     }
 
-    public static void dialog(String text, String title, MessageType type, Runnable onAccept) {
-        dialog(new MessageDialogPane(text, title, type, onAccept));
+    public static void dialog(String text, String title, MessageType type, Runnable ok) {
+        dialog(MessageDialogPane.ok(text, title, type, ok));
     }
 
-    public static void confirm(String text, String title, Runnable onAccept, Runnable onCancel) {
-        dialog(new MessageDialogPane(text, title, onAccept, onCancel));
+    public static void confirm(String text, String title, Runnable yes, Runnable no) {
+        confirm(text, title, MessageType.QUESTION, yes, no);
+    }
+
+    public static void confirm(String text, String title, MessageType type, Runnable yes, Runnable no) {
+        dialog(MessageDialogPane.yesOrNo(text, title, type, yes, no));
+    }
+
+    public static void confirmAction(String text, String title, MessageType type, ButtonBase actionButton) {
+        dialog(MessageDialogPane.actionOrCancel(text, title, type, actionButton, null));
+    }
+
+    public static void confirmAction(String text, String title, MessageType type, ButtonBase actionButton, Runnable cancel) {
+        dialog(MessageDialogPane.actionOrCancel(text, title, type, actionButton, cancel));
     }
 
     public static CompletableFuture<String> prompt(String title, FutureCallback<String> onResult) {
@@ -210,6 +261,9 @@ public final class Controllers {
         rootPage = null;
         versionPage = null;
         serversPage = null;
+        gameListPage = null;
+        settingsPage = null;
+        modDownloadListPage = null;
         decorator = null;
         stage = null;
         scene = null;

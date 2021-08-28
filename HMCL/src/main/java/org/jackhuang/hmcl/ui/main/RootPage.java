@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -41,10 +41,7 @@ import org.jackhuang.hmcl.ui.construct.AdvancedListItem;
 import org.jackhuang.hmcl.ui.construct.TabHeader;
 import org.jackhuang.hmcl.ui.decorator.DecoratorTabPage;
 import org.jackhuang.hmcl.ui.download.ModpackInstallWizardProvider;
-import org.jackhuang.hmcl.ui.profile.ProfileAdvancedListItem;
-import org.jackhuang.hmcl.ui.profile.ProfileList;
 import org.jackhuang.hmcl.ui.versions.GameAdvancedListItem;
-import org.jackhuang.hmcl.ui.versions.GameList;
 import org.jackhuang.hmcl.ui.versions.Versions;
 import org.jackhuang.hmcl.upgrade.UpdateChecker;
 import org.jackhuang.hmcl.util.io.CompressingUtils;
@@ -65,15 +62,10 @@ import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 public class RootPage extends DecoratorTabPage {
     private MainPage mainPage = null;
     private SettingsPage settingsPage = null;
-    private GameList gameListPage = null;
     private AccountList accountListPage = null;
-    private ProfileList profileListPage = null;
 
-    private final TabHeader.Tab mainTab = new TabHeader.Tab("main");
-    private final TabHeader.Tab settingsTab = new TabHeader.Tab("settings");
-    private final TabHeader.Tab gameTab = new TabHeader.Tab("game");
-    private final TabHeader.Tab accountTab = new TabHeader.Tab("account");
-    private final TabHeader.Tab profileTab = new TabHeader.Tab("profile");
+    private final TabHeader.Tab<MainPage> mainTab = new TabHeader.Tab<>("main");
+    private final TabHeader.Tab<AccountList> accountTab = new TabHeader.Tab<>("account");
 
     public RootPage() {
         setLeftPaneWidth(200);
@@ -85,11 +77,8 @@ public class RootPage extends DecoratorTabPage {
             onRefreshedVersions(Profiles.selectedProfileProperty().get().getRepository());
 
         mainTab.setNodeSupplier(this::getMainPage);
-        settingsTab.setNodeSupplier(this::getSettingsPage);
-        gameTab.setNodeSupplier(this::getGameListPage);
         accountTab.setNodeSupplier(this::getAccountListPage);
-        profileTab.setNodeSupplier(this::getProfileListPage);
-        getTabs().setAll(mainTab, settingsTab, gameTab, accountTab, profileTab);
+        getTabs().setAll(mainTab, accountTab);
     }
 
     @Override
@@ -151,17 +140,6 @@ public class RootPage extends DecoratorTabPage {
         return settingsPage;
     }
 
-    private GameList getGameListPage() {
-        if (gameListPage == null) {
-            gameListPage = new GameList();
-            FXUtils.applyDragListener(gameListPage, it -> "zip".equals(FileUtils.getExtension(it)), modpacks -> {
-                File modpack = modpacks.get(0);
-                Controllers.getDecorator().startWizard(new ModpackInstallWizardProvider(Profiles.getSelectedProfile(), modpack), i18n("install.modpack"));
-            });
-        }
-        return gameListPage;
-    }
-
     private AccountList getAccountListPage() {
         if (accountListPage == null) {
             accountListPage = new AccountList();
@@ -171,40 +149,24 @@ public class RootPage extends DecoratorTabPage {
         return accountListPage;
     }
 
-    private ProfileList getProfileListPage() {
-        if (profileListPage == null) {
-            profileListPage = new ProfileList();
-            profileListPage.selectedProfileProperty().bindBidirectional(Profiles.selectedProfileProperty());
-            profileListPage.profilesProperty().bindContent(Profiles.profilesProperty());
-        }
-        return profileListPage;
-    }
-
     public Tab getMainTab() {
         return mainTab;
-    }
-
-    public Tab getSettingsTab() {
-        return settingsTab;
-    }
-
-    public Tab getGameTab() {
-        return gameTab;
     }
 
     public Tab getAccountTab() {
         return accountTab;
     }
 
-    public Tab getProfileTab() {
-        return profileTab;
-    }
-
-    private void selectPage(Tab tab) {
+    /**
+     * @return true if the tab is being opened, or false if the tab is being closed
+     */
+    private boolean selectPage(Tab tab) {
         if (getSelectionModel().getSelectedItem() == tab) {
             getSelectionModel().select(getMainTab());
+            return false;
         } else {
             getSelectionModel().select(tab);
+            return true;
         }
     }
 
@@ -216,17 +178,23 @@ public class RootPage extends DecoratorTabPage {
             // first item in left sidebar
             AccountAdvancedListItem accountListItem = new AccountAdvancedListItem();
             accountListItem.activeProperty().bind(control.accountTab.selectedProperty());
-            accountListItem.setOnAction(e -> control.selectPage(control.accountTab));
+            accountListItem.setOnAction(e -> {
+                if (control.selectPage(control.accountTab)) {
+                    // open create account dialog if no account exists
+                    if (Accounts.getAccounts().isEmpty()) {
+                        Controllers.dialog(new AddAccountPane());
+                    }
+                }
+            });
             accountListItem.accountProperty().bind(Accounts.selectedAccountProperty());
 
             // second item in left sidebar
             GameAdvancedListItem gameListItem = new GameAdvancedListItem();
-            gameListItem.actionButtonVisibleProperty().bind(Profiles.selectedVersionProperty().isNotNull());
             gameListItem.setOnAction(e -> {
                 Profile profile = Profiles.getSelectedProfile();
                 String version = Profiles.getSelectedVersion();
                 if (version == null) {
-                    control.selectPage(control.gameTab);
+                    Controllers.navigate(Controllers.getGameListPage());
                 } else {
                     Versions.modifyGameSettings(profile, version);
                 }
@@ -234,23 +202,16 @@ public class RootPage extends DecoratorTabPage {
 
             // third item in left sidebar
             AdvancedListItem gameItem = new AdvancedListItem();
-            gameItem.activeProperty().bind(control.gameTab.selectedProperty());
-            gameItem.setImage(newImage("/assets/img/bookshelf.png"));
+            gameItem.setLeftGraphic(AdvancedListItem.createImageView(newImage("/assets/img/bookshelf.png")).getKey());
             gameItem.setTitle(i18n("version.manage"));
-            gameItem.setOnAction(e -> control.selectPage(control.gameTab));
-
-            // forth item in left sidebar
-            ProfileAdvancedListItem profileListItem = new ProfileAdvancedListItem();
-            profileListItem.activeProperty().bind(control.profileTab.selectedProperty());
-            profileListItem.setOnAction(e -> control.selectPage(control.profileTab));
-            profileListItem.profileProperty().bind(Profiles.selectedProfileProperty());
+            gameItem.setOnAction(e -> Controllers.navigate(Controllers.getGameListPage()));
 
             // fifth item in left sidebar
             AdvancedListItem launcherSettingsItem = new AdvancedListItem();
-            launcherSettingsItem.activeProperty().bind(control.settingsTab.selectedProperty());
-            launcherSettingsItem.setImage(newImage("/assets/img/command.png"));
+            launcherSettingsItem.setLeftGraphic(AdvancedListItem.createImageView(newImage("/assets/img/command.png")).getKey());
+            launcherSettingsItem.setActionButtonVisible(false);
             launcherSettingsItem.setTitle(i18n("settings.launcher"));
-            launcherSettingsItem.setOnAction(e -> control.selectPage(control.settingsTab));
+            launcherSettingsItem.setOnAction(e -> Controllers.navigate(Controllers.getSettingsPage()));
 
             // the left sidebar
             AdvancedListBox sideBar = new AdvancedListBox()
@@ -259,8 +220,6 @@ public class RootPage extends DecoratorTabPage {
                     .startCategory(i18n("version").toUpperCase())
                     .add(gameListItem)
                     .add(gameItem)
-                    .startCategory(i18n("profile.title").toUpperCase())
-                    .add(profileListItem)
                     .startCategory(i18n("launcher").toUpperCase())
                     .add(launcherSettingsItem);
 

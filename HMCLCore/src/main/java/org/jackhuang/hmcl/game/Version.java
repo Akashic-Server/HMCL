@@ -163,7 +163,7 @@ public class Version implements Comparable<Version>, Validation {
     }
 
     public String getJar() {
-        return jar == null ? id : jar;
+        return jar;
     }
 
     public String getInheritsFrom() {
@@ -212,6 +212,10 @@ public class Version implements Comparable<Version>, Validation {
 
     public List<CompatibilityRule> getCompatibilityRules() {
         return compatibilityRules == null ? Collections.emptyList() : Collections.unmodifiableList(compatibilityRules);
+    }
+
+    public Map<DownloadType, DownloadInfo> getDownloads() {
+        return downloads == null ? Collections.emptyMap() : Collections.unmodifiableMap(downloads);
     }
 
     public DownloadInfo getDownloadInfo() {
@@ -274,15 +278,17 @@ public class Version implements Comparable<Version>, Validation {
         Version thisVersion;
 
         if (inheritsFrom == null) {
-            if (isRoot())
+            if (isRoot()) {
                 thisVersion = new Version(id).setPatches(patches);
-            else
+            } else {
                 thisVersion = this;
+            }
+            thisVersion = this.jar == null ? thisVersion.setJar(id) : thisVersion.setJar(this.jar);
         } else {
             // To maximize the compatibility.
             if (!resolvedSoFar.add(id)) {
                 Logging.LOG.log(Level.WARNING, "Found circular dependency versions: " + resolvedSoFar);
-                thisVersion = this;
+                thisVersion = this.jar == null ? this.setJar(id) : this;
             } else {
                 // It is supposed to auto install an version in getVersion.
                 thisVersion = merge(provider.getVersion(inheritsFrom).resolve(provider, resolvedSoFar), false);
@@ -333,7 +339,7 @@ public class Version implements Comparable<Version>, Validation {
             }
         }
 
-        return thisVersion.setId(id);
+        return thisVersion.setId(id).setJar(resolve(provider).getJar());
     }
 
     private Version markAsResolved() {

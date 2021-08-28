@@ -22,7 +22,6 @@ import javafx.scene.Node;
 import javafx.scene.control.Skin;
 import javafx.stage.FileChooser;
 import org.jackhuang.hmcl.download.LibraryAnalyzer;
-import org.jackhuang.hmcl.game.GameVersion;
 import org.jackhuang.hmcl.game.Version;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.task.Schedulers;
@@ -44,7 +43,7 @@ import java.util.function.Function;
 import static org.jackhuang.hmcl.ui.FXUtils.runInFX;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
-public class InstallerListPage extends ListPageBase<InstallerItem> {
+public class InstallerListPage extends ListPageBase<InstallerItem> implements VersionPage.VersionLoadable {
     private Profile profile;
     private String versionId;
     private Version version;
@@ -62,14 +61,15 @@ public class InstallerListPage extends ListPageBase<InstallerItem> {
         return new InstallerListPageSkin();
     }
 
-    public CompletableFuture<?> loadVersion(Profile profile, String versionId) {
+    @Override
+    public void loadVersion(Profile profile, String versionId) {
         this.profile = profile;
         this.versionId = versionId;
         this.version = profile.getRepository().getVersion(versionId);
         this.gameVersion = null;
 
-        return CompletableFuture.supplyAsync(() -> {
-            gameVersion = GameVersion.minecraftVersion(profile.getRepository().getVersionJar(version)).orElse(null);
+        CompletableFuture.supplyAsync(() -> {
+            gameVersion = profile.getRepository().getGameVersion(version).orElse(null);
 
             return LibraryAnalyzer.analyze(profile.getRepository().getResolvedPreservingPatchesVersion(versionId));
         }).thenAcceptAsync(analyzer -> {

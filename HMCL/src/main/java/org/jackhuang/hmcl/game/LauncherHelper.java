@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,6 +17,7 @@
  */
 package org.jackhuang.hmcl.game;
 
+import com.jfoenix.controls.JFXButton;
 import javafx.application.Platform;
 import javafx.stage.Stage;
 import org.jackhuang.hmcl.Launcher;
@@ -47,8 +48,10 @@ import org.jackhuang.hmcl.setting.VersionSetting;
 import org.jackhuang.hmcl.task.*;
 import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.DialogController;
+import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.LogWindow;
 import org.jackhuang.hmcl.ui.construct.DialogCloseEvent;
+import org.jackhuang.hmcl.ui.construct.MessageDialogPane;
 import org.jackhuang.hmcl.ui.construct.MessageDialogPane.MessageType;
 import org.jackhuang.hmcl.ui.construct.TaskExecutorDialogPane;
 import org.jackhuang.hmcl.util.*;
@@ -130,7 +133,7 @@ public final class LauncherHelper {
         HMCLGameRepository repository = profile.getRepository();
         DefaultDependencyManager dependencyManager = profile.getDependency();
         Version version = MaintainTask.maintain(repository, repository.getResolvedVersion(selectedVersion));
-        Optional<String> gameVersion = GameVersion.minecraftVersion(repository.getVersionJar(version));
+        Optional<String> gameVersion = repository.getGameVersion(version);
         boolean integrityCheck = repository.unmarkVersionLaunchedAbnormally(selectedVersion);
         CountDownLatch launchingLatch = new CountDownLatch(1);
 
@@ -308,7 +311,7 @@ public final class LauncherHelper {
 
         // Without onAccept called, the launching operation will be terminated.
 
-        VersionNumber gameVersion = VersionNumber.asVersion(GameVersion.minecraftVersion(profile.getRepository().getVersionJar(version)).orElse("Unknown"));
+        VersionNumber gameVersion = VersionNumber.asVersion(profile.getRepository().getGameVersion(version).orElse("Unknown"));
         JavaVersion java = setting.getJavaVersion();
         if (java == null) {
             Controllers.dialog(i18n("launch.wrong_javadir"), i18n("message.warning"), MessageType.WARNING, onAccept);
@@ -326,7 +329,20 @@ public final class LauncherHelper {
                 if (acceptableJava.isPresent()) {
                     setting.setJavaVersion(acceptableJava.get());
                 } else {
-                    Controllers.confirm(i18n("launch.advice.require_newer_java_version", gameVersion.toString(), version.getJavaVersion().getMajorVersion()), i18n("message.warning"), () -> {
+                    MessageDialogPane dialog = new MessageDialogPane(
+                            i18n("launch.advice.require_newer_java_version",
+                                    gameVersion.toString(),
+                                    version.getJavaVersion().getMajorVersion()),
+                            i18n("message.warning"),
+                            MessageType.QUESTION);
+
+                    JFXButton linkButton = new JFXButton(i18n("download.external_link"));
+                    linkButton.setOnAction(e -> FXUtils.openLink("https://adoptopenjdk.net/"));
+                    linkButton.getStyleClass().add("dialog-accept");
+                    dialog.addButton(linkButton);
+
+                    JFXButton yesButton = new JFXButton(i18n("button.ok"));
+                    yesButton.setOnAction(event -> {
                         downloadJava(version.getJavaVersion(), profile)
                                 .thenAcceptAsync(x -> {
                                     try {
@@ -338,10 +354,34 @@ public final class LauncherHelper {
                                         LOG.log(Level.SEVERE, "Cannot list javas", e);
                                     }
                                 }, Platform::runLater).thenAccept(x -> onAccept.run());
-                    }, null);
+                    });
+                    yesButton.getStyleClass().add("dialog-accept");
+                    dialog.addButton(yesButton);
+
+                    JFXButton noButton = new JFXButton(i18n("button.cancel"));
+                    noButton.getStyleClass().add("dialog-cancel");
+                    dialog.addButton(noButton);
+                    dialog.setCancelButton(noButton);
+
+                    Controllers.dialog(dialog);
                     flag = true;
                 }
             }
+        }
+
+        // Game later than 1.17 requires Java 16.
+        if (!flag && java.getParsedVersion() < JavaVersion.JAVA_16 && gameVersion.compareTo(VersionNumber.asVersion("1.17")) >= 0) {
+            Optional<JavaVersion> acceptableJava = JavaVersion.getJavas().stream()
+                    .filter(javaVersion -> javaVersion.getParsedVersion() >= JavaVersion.JAVA_16)
+                    .max(Comparator.comparing(JavaVersion::getVersionNumber));
+            if (acceptableJava.isPresent()) {
+                setting.setJavaVersion(acceptableJava.get());
+            } else {
+                Controllers.confirm(i18n("launch.advice.require_newer_java_version", gameVersion.toString(), 16), i18n("message.warning"), () -> {
+                    FXUtils.openLink("https://adoptopenjdk.net/");
+                }, null);
+            }
+            flag = true;
         }
 
         // Game later than 1.7.2 accepts Java 8.

@@ -26,6 +26,7 @@ import javafx.event.EventHandler;
 import javafx.scene.Node;
 import javafx.scene.image.Image;
 import javafx.scene.input.DragEvent;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import org.jackhuang.hmcl.Launcher;
@@ -56,6 +57,7 @@ import static java.util.logging.Level.WARNING;
 import static java.util.stream.Collectors.toList;
 import static org.jackhuang.hmcl.setting.ConfigHolder.config;
 import static org.jackhuang.hmcl.ui.FXUtils.newImage;
+import static org.jackhuang.hmcl.ui.FXUtils.onEscPressed;
 import static org.jackhuang.hmcl.util.Logging.LOG;
 import static org.jackhuang.hmcl.util.io.FileUtils.getExtension;
 
@@ -84,6 +86,40 @@ public class DecoratorController {
         setupBackground();
 
         setupAuthlibInjectorDnD();
+
+        // pass key events to current dialog / current page
+        decorator.addEventFilter(KeyEvent.ANY, e -> {
+            if (!(e.getTarget() instanceof Node)) {
+                return; // event source can't be determined
+            }
+
+            Node newTarget;
+            if (dialogPane != null && dialogPane.peek().isPresent()) {
+                newTarget = dialogPane.peek().get(); // current dialog
+            } else {
+                newTarget = navigator.getCurrentPage(); // current page
+            }
+
+            boolean needsRedirect = true;
+            Node t = (Node) e.getTarget();
+            while (t != null) {
+                if (t == newTarget) {
+                    // current event target is in newTarget
+                    needsRedirect = false;
+                    break;
+                }
+                t = t.getParent();
+            }
+            if (!needsRedirect) {
+                return;
+            }
+
+            e.consume();
+            newTarget.fireEvent(e.copyFor(e.getSource(), newTarget));
+        });
+
+        // press ESC to go back
+        onEscPressed(navigator, this::back);
     }
 
     public Decorator getDecorator() {
@@ -200,10 +236,15 @@ public class DecoratorController {
         if (navigator.getCurrentPage() instanceof DecoratorPage) {
             DecoratorPage page = (DecoratorPage) navigator.getCurrentPage();
 
-            if (page.back())
-                navigator.close();
+            if (page.back()) {
+                if (navigator.canGoBack()) {
+                    navigator.close();
+                }
+            }
         } else {
-            navigator.close();
+            if (navigator.canGoBack()) {
+                navigator.close();
+            }
         }
     }
 
@@ -214,14 +255,6 @@ public class DecoratorController {
             if (refreshable.refreshableProperty().get())
                 refreshable.refresh();
         }
-    }
-
-    private void onNavigating(Navigator.NavigationEvent event) {
-        if (event.getSource() != this.navigator) return;
-        Node from = event.getNode();
-
-        if (from instanceof DecoratorPage)
-            ((DecoratorPage) from).back();
     }
 
     private void onNavigated(Navigator.NavigationEvent event) {
@@ -242,6 +275,8 @@ public class DecoratorController {
         } else {
             decorator.showCloseAsHomeProperty().set(true);
         }
+
+        decorator.setNavigationDirection(event.getDirection());
 
         // state property should be updated at last.
         if (to instanceof DecoratorPage) {
@@ -281,6 +316,8 @@ public class DecoratorController {
             dialog.setDialogContainer(decorator.getDrawerWrapper());
             dialog.setOverlayClose(false);
             dialog.show();
+
+            navigator.setDisable(true);
         }
         dialogPane.push(node);
 
@@ -320,6 +357,8 @@ public class DecoratorController {
                 dialog.close();
                 dialog = null;
                 dialogPane = null;
+
+                navigator.setDisable(false);
             }
         }
     }

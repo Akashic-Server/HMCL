@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,12 +20,13 @@ package org.jackhuang.hmcl.ui.download;
 import com.jfoenix.controls.JFXButton;
 import com.jfoenix.controls.JFXTextField;
 import javafx.application.Platform;
-import javafx.beans.binding.Bindings;
 import javafx.fxml.FXML;
 import javafx.scene.control.Label;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.stage.FileChooser;
+
+import org.jackhuang.hmcl.game.HMCLGameRepository;
 import org.jackhuang.hmcl.game.ModpackHelper;
 import org.jackhuang.hmcl.mod.Modpack;
 import org.jackhuang.hmcl.setting.Profile;
@@ -35,17 +36,18 @@ import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.WebStage;
 import org.jackhuang.hmcl.ui.construct.MessageDialogPane.MessageType;
+import org.jackhuang.hmcl.ui.construct.RequiredValidator;
 import org.jackhuang.hmcl.ui.construct.SpinnerPane;
 import org.jackhuang.hmcl.ui.construct.Validator;
 import org.jackhuang.hmcl.ui.wizard.WizardController;
 import org.jackhuang.hmcl.ui.wizard.WizardPage;
-import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.io.CompressingUtils;
 
 import java.io.File;
 import java.util.Map;
 import java.util.Optional;
 
+import static javafx.beans.binding.Bindings.createBooleanBinding;
 import static org.jackhuang.hmcl.util.Lang.tryCast;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
@@ -93,14 +95,13 @@ public final class LocalModpackPage extends StackPane implements WizardPage {
             txtModpackName.setDisable(true);
         } else {
             txtModpackName.getValidators().addAll(
-                    new Validator(i18n("install.new_game.already_exists"), str -> !profile.getRepository().hasVersion(str) && StringUtils.isNotBlank(str)),
-                    new Validator(i18n("version.forbidden_name"), str -> !profile.getRepository().forbidsVersion(str))
-            );
+                    new RequiredValidator(),
+                    new Validator(i18n("install.new_game.already_exists"), str -> !profile.getRepository().versionIdConflicts(str)),
+                    new Validator(i18n("install.new_game.malformed"), HMCLGameRepository::isValidVersionId));
+            btnInstall.disableProperty().bind(
+                    createBooleanBinding(txtModpackName::validate, txtModpackName.textProperty())
+                            .not());
         }
-
-        btnInstall.disableProperty().bind(Bindings.createBooleanBinding(
-                () -> !txtModpackName.validate(),
-                txtModpackName.textProperty()));
 
         Optional<File> filePath = tryCast(controller.getSettings().get(MODPACK_FILE), File.class);
         if (filePath.isPresent()) {
@@ -131,7 +132,8 @@ public final class LocalModpackPage extends StackPane implements WizardPage {
                     lblModpackLocation.setText(selectedFile.getAbsolutePath());
 
                     if (!name.isPresent()) {
-                        txtModpackName.setText(manifest.getName());
+                        // trim: https://github.com/huanghongxun/HMCL/issues/962
+                        txtModpackName.setText(manifest.getName().trim());
                     }
                 }, e -> {
                     Controllers.dialog(i18n("modpack.task.install.error"), i18n("message.error"), MessageType.ERROR);

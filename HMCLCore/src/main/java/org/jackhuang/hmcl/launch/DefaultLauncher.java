@@ -71,9 +71,43 @@ public class DefaultLauncher extends Launcher {
     private CommandBuilder generateCommandLine(File nativeFolder) throws IOException {
         CommandBuilder res = new CommandBuilder();
 
+        switch (options.getProcessPriority()) {
+            case HIGH:
+                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+                    res.add("cmd", "/C", "start", "unused title", "/B", "/high");
+                } else if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
+                    res.add("nice", "-n", "-5");
+                }
+                break;
+            case ABOVE_NORMAL:
+                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+                    res.add("cmd", "/C", "start", "unused title", "/B", "/abovenormal");
+                } else if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
+                    res.add("nice", "-n", "-1");
+                }
+                break;
+            case NORMAL:
+                // do nothing
+                break;
+            case BELOW_NORMAL:
+                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+                    res.add("cmd", "/C", "start", "unused title", "/B", "/belownormal");
+                } else if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
+                    res.add("nice", "-n", "1");
+                }
+                break;
+            case LOW:
+                if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+                    res.add("cmd", "/C", "start", "unused title", "/B", "/low");
+                } else if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
+                    res.add("nice", "-n", "5");
+                }
+                break;
+        }
+
         // Executable
         if (StringUtils.isNotBlank(options.getWrapper()))
-            res.add(options.getWrapper());
+            res.addAllWithoutParsing(StringUtils.tokenize(options.getWrapper()));
 
         res.add(options.getJava().getBinary().toString());
 
@@ -304,7 +338,8 @@ public class DefaultLauncher extends Launcher {
                 // when we propose this placeholder.
                 pair("${libraries_directory}", repository.getLibrariesDirectory(version).getAbsolutePath()),
                 // file_separator is used in -DignoreList
-                pair("${file_separator}", OperatingSystem.FILE_SEPARATOR)
+                pair("${file_separator}", OperatingSystem.FILE_SEPARATOR),
+                pair("${primary_jar_name}", FileUtils.getName(repository.getVersionJar(version).toPath()))
         );
     }
 

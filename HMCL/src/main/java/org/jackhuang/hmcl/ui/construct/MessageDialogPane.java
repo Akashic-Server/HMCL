@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,16 +18,20 @@
 package org.jackhuang.hmcl.ui.construct;
 
 import com.jfoenix.controls.JFXButton;
+
+import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
+import javafx.scene.control.ButtonBase;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.Optional;
-
+import static org.jackhuang.hmcl.ui.FXUtils.onEscPressed;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
 public final class MessageDialogPane extends StackPane {
@@ -41,10 +45,6 @@ public final class MessageDialogPane extends StackPane {
     }
 
     @FXML
-    private JFXButton acceptButton;
-    @FXML
-    private JFXButton cancelButton;
-    @FXML
     private Label content;
     @FXML
     private Label graphic;
@@ -53,19 +53,15 @@ public final class MessageDialogPane extends StackPane {
     @FXML
     private HBox actions;
 
-    public MessageDialogPane(String text, String title, MessageType type, Runnable onAccept) {
+    private @Nullable ButtonBase cancelButton;
+
+    public MessageDialogPane(@NotNull String text, @Nullable String title, @NotNull MessageType type) {
         FXUtils.loadFXML(this, "/assets/fxml/message-dialog.fxml");
+
+        content.setText(text);
 
         if (title != null)
             this.title.setText(title);
-
-        content.setText(text);
-        acceptButton.setOnMouseClicked(e -> {
-            fireEvent(new DialogCloseEvent());
-            Optional.ofNullable(onAccept).ifPresent(Runnable::run);
-        });
-
-        actions.getChildren().remove(cancelButton);
 
         switch (type) {
             case INFORMATION:
@@ -86,20 +82,70 @@ public final class MessageDialogPane extends StackPane {
             default:
                 throw new IllegalArgumentException("Unrecognized message box message type " + type);
         }
+
+        onEscPressed(this, () -> {
+            if (cancelButton != null) {
+                cancelButton.fire();
+            }
+        });
     }
 
-    public MessageDialogPane(String text, String title, Runnable onAccept, Runnable onCancel) {
-        this(text, title, MessageType.QUESTION, onAccept);
+    public void addButton(ButtonBase btn) {
+        btn.addEventHandler(ActionEvent.ACTION, e -> fireEvent(new DialogCloseEvent()));
+        actions.getChildren().add(btn);
+    }
 
-        cancelButton.setVisible(true);
-        cancelButton.setOnMouseClicked(e -> {
-            fireEvent(new DialogCloseEvent());
-            Optional.ofNullable(onCancel).ifPresent(Runnable::run);
-        });
+    public void setCancelButton(@Nullable ButtonBase btn) {
+        cancelButton = btn;
+    }
 
-        acceptButton.setText(i18n("button.yes"));
-        cancelButton.setText(i18n("button.no"));
+    public static MessageDialogPane ok(String text, String title, MessageType type, Runnable ok) {
+        MessageDialogPane dialog = new MessageDialogPane(text, title, type);
 
-        actions.getChildren().add(cancelButton);
+        JFXButton btnOk = new JFXButton(i18n("button.ok"));
+        btnOk.getStyleClass().add("dialog-accept");
+        if (ok != null) {
+            btnOk.setOnAction(e -> ok.run());
+        }
+        dialog.addButton(btnOk);
+        dialog.setCancelButton(btnOk);
+
+        return dialog;
+    }
+
+    public static MessageDialogPane yesOrNo(String text, String title, MessageType type, Runnable yes, Runnable no) {
+        MessageDialogPane dialog = new MessageDialogPane(text, title, type);
+
+        JFXButton btnYes = new JFXButton(i18n("button.yes"));
+        btnYes.getStyleClass().add("dialog-accept");
+        if (yes != null) {
+            btnYes.setOnAction(e -> yes.run());
+        }
+        dialog.addButton(btnYes);
+
+        JFXButton btnNo = new JFXButton(i18n("button.no"));
+        btnNo.getStyleClass().add("dialog-cancel");
+        if (no != null) {
+            btnNo.setOnAction(e -> no.run());
+        }
+        dialog.addButton(btnNo);
+        dialog.setCancelButton(btnNo);
+
+        return dialog;
+    }
+
+    public static MessageDialogPane actionOrCancel(String text, String title, MessageType type, ButtonBase actionButton, Runnable cancel) {
+        MessageDialogPane dialog = new MessageDialogPane(text, title, type);
+        dialog.addButton(actionButton);
+
+        JFXButton btnCancel = new JFXButton(i18n("button.cancel"));
+        btnCancel.getStyleClass().add("dialog-cancel");
+        if (cancel != null) {
+            btnCancel.setOnAction(e -> cancel.run());
+        }
+        dialog.addButton(btnCancel);
+        dialog.setCancelButton(btnCancel);
+
+        return dialog;
     }
 }
