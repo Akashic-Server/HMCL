@@ -38,7 +38,7 @@ public class AboutPage extends StackPane {
             launcher.setImage(new Image("/assets/img/craft_table.png", 32, 32, false, true));
             launcher.setTitle("Hello Minecraft! Launcher");
             launcher.setSubtitle(Metadata.VERSION);
-            launcher.setExternalLink("https://hmcl.huangyuhui.net");
+            launcher.setExternalLink("https://github.com/Akashic-Server/HMCL");
 
             IconedTwoLineListItem author = new IconedTwoLineListItem();
             author.setImage(new Image("/assets/img/yellow_fish.jpg", 32, 32, false, true));
