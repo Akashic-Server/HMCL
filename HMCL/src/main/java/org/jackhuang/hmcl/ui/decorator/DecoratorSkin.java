@@ -89,6 +89,8 @@ public class DecoratorSkin extends SkinBase<Decorator> {
         clip.setArcHeight(8);
         parent.setClip(clip);
 
+        skinnable.getSnackbar().registerSnackbarContainer(parent);
+
         root.addEventFilter(MouseEvent.MOUSE_RELEASED, this::onMouseReleased);
         root.addEventFilter(MouseEvent.MOUSE_DRAGGED, this::onMouseDragged);
         root.addEventFilter(MouseEvent.MOUSE_MOVED, this::onMouseMoved);
@@ -187,7 +189,9 @@ public class DecoratorSkin extends SkinBase<Decorator> {
                             s.isAnimate() ? Duration.millis(160) : null, leftPane.prefWidthProperty(), null, container.getWidth(), FXUtils.SINE);
                     if (animation != null) {
                         animation.setOnFinished(action -> {
-                            leftPane.prefWidthProperty().bind(container.widthProperty());
+                            if (animation.getStatus() != Animation.Status.STOPPED) {
+                                leftPane.prefWidthProperty().bind(container.widthProperty());
+                            }
                         });
                     }
                 }

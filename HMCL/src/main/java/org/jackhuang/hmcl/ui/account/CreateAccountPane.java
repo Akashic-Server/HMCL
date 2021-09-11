@@ -18,14 +18,19 @@
 package org.jackhuang.hmcl.ui.account;
 
 import com.jfoenix.controls.*;
+import com.jfoenix.validation.base.ValidatorBase;
 import javafx.application.Platform;
+import javafx.beans.NamedArg;
 import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.TextInputControl;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import org.jackhuang.hmcl.auth.AccountFactory;
@@ -33,11 +38,15 @@ import org.jackhuang.hmcl.auth.CharacterSelector;
 import org.jackhuang.hmcl.auth.NoSelectedCharacterException;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorAccountFactory;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorServer;
+import org.jackhuang.hmcl.auth.microsoft.MicrosoftAccountFactory;
+import org.jackhuang.hmcl.auth.offline.OfflineAccountFactory;
 import org.jackhuang.hmcl.auth.yggdrasil.GameProfile;
 import org.jackhuang.hmcl.auth.yggdrasil.YggdrasilAccountFactory;
 import org.jackhuang.hmcl.auth.yggdrasil.YggdrasilService;
+import org.jackhuang.hmcl.game.MicrosoftAuthenticationServer;
 import org.jackhuang.hmcl.game.TexturesLoader;
 import org.jackhuang.hmcl.setting.Accounts;
+import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
 import org.jackhuang.hmcl.task.TaskExecutor;
@@ -45,6 +54,9 @@ import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
 import org.jackhuang.hmcl.ui.construct.*;
+import org.jackhuang.hmcl.util.StringUtils;
+import org.jackhuang.hmcl.util.gson.UUIDTypeAdapter;
+import org.jackhuang.hmcl.util.javafx.BindingMapping;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -61,24 +73,25 @@ import static org.jackhuang.hmcl.ui.FXUtils.*;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 import static org.jackhuang.hmcl.util.javafx.ExtendedProperties.classPropertyFor;
 
-public class CreateAccountPane extends JFXDialogLayout {
+public class CreateAccountPane extends JFXDialogLayout implements DialogAware {
 
     private boolean showMethodSwitcher;
     private AccountFactory<?> factory;
 
-    private Label lblErrorMessage;
-    private JFXButton btnAccept;
-    private SpinnerPane spinner;
-    private JFXButton btnCancel;
-    private Node body;
+    private final Label lblErrorMessage;
+    private final JFXButton btnAccept;
+    private final SpinnerPane spinner;
+    private final Node body;
 
     private Node detailsPane; // AccountDetailsInputPane for Offline / Mojang / authlib-injector, Label for Microsoft
-    private Pane detailsContainer;
+    private final Pane detailsContainer;
+
+    private final BooleanProperty logging = new SimpleBooleanProperty();
 
     private TaskExecutor loginTask;
 
     public CreateAccountPane() {
-        this(null);
+        this((AccountFactory<?>) null);
     }
 
     public CreateAccountPane(AccountFactory<?> factory) {
@@ -108,7 +121,7 @@ public class CreateAccountPane extends JFXDialogLayout {
         {
             lblErrorMessage = new Label();
 
-            btnAccept = new JFXButton(i18n("button.ok"));
+            btnAccept = new JFXButton(i18n("account.login"));
             btnAccept.getStyleClass().add("dialog-accept");
             btnAccept.setOnAction(e -> onAccept());
 
@@ -116,7 +129,7 @@ public class CreateAccountPane extends JFXDialogLayout {
             spinner.getStyleClass().add("small-spinner-pane");
             spinner.setContent(btnAccept);
 
-            btnCancel = new JFXButton(i18n("button.cancel"));
+            JFXButton btnCancel = new JFXButton(i18n("button.cancel"));
             btnCancel.getStyleClass().add("dialog-cancel");
             btnCancel.setOnAction(e -> onCancel());
             onEscPressed(this, btnCancel::fire);
@@ -170,10 +183,18 @@ public class CreateAccountPane extends JFXDialogLayout {
         setPrefWidth(560);
     }
 
+    public CreateAccountPane(AuthlibInjectorServer authserver) {
+        this(Accounts.FACTORY_AUTHLIB_INJECTOR);
+        ((AccountDetailsInputPane) detailsPane).selectAuthServer(authserver);
+    }
+
     private void onAccept() {
         spinner.showSpinner();
         lblErrorMessage.setText("");
-        body.setDisable(true);
+
+        if (!(factory instanceof MicrosoftAccountFactory)) {
+            body.setDisable(true);
+        }
 
         String username;
         String password;
@@ -182,12 +203,14 @@ public class CreateAccountPane extends JFXDialogLayout {
             AccountDetailsInputPane details = (AccountDetailsInputPane) detailsPane;
             username = details.getUsername();
             password = details.getPassword();
-            additionalData = details.getAuthServer();
+            additionalData = details.getAdditionalData();
         } else {
             username = null;
             password = null;
             additionalData = null;
         }
+
+        logging.set(true);
 
         loginTask = Task.supplyAsync(() -> factory.create(new DialogCharacterSelector(), username, password, null, additionalData))
                 .whenComplete(Schedulers.javafx(), account -> {
@@ -231,9 +254,17 @@ public class CreateAccountPane extends JFXDialogLayout {
             lblErrorMessage.setText("");
         }
         if (factory == Accounts.FACTORY_MICROSOFT) {
-            Label lblTip = new Label(i18n("account.methods.microsoft.manual")); // TODO
-            lblTip.setWrapText(true);
-            detailsPane = lblTip;
+            HintPane hintPane = new HintPane(MessageDialogPane.MessageType.INFORMATION);
+            hintPane.textProperty().bind(BindingMapping.of(logging).map(logging ->
+                    logging
+                            ? i18n("account.methods.microsoft.manual")
+                            : i18n("account.methods.microsoft.hint")));
+            hintPane.setOnMouseClicked(e -> {
+                if (logging.get() && MicrosoftAuthenticationServer.lastlyOpenedURL != null) {
+                    FXUtils.copyText(MicrosoftAuthenticationServer.lastlyOpenedURL);
+                }
+            });
+            detailsPane = hintPane;
             btnAccept.setDisable(false);
         } else {
             detailsPane = new AccountDetailsInputPane(factory, btnAccept::fire);
@@ -271,12 +302,13 @@ public class CreateAccountPane extends JFXDialogLayout {
         private @Nullable JFXComboBox<AuthlibInjectorServer> cboServers;
         private @Nullable JFXTextField txtUsername;
         private @Nullable JFXPasswordField txtPassword;
+        private @Nullable JFXTextField txtUUID;
         private BooleanBinding valid;
 
         public AccountDetailsInputPane(AccountFactory<?> factory, Runnable onAction) {
             this.factory = factory;
 
-            setVgap(15);
+            setVgap(22);
             setHgap(15);
             setAlignment(Pos.CENTER);
 
@@ -307,30 +339,22 @@ public class CreateAccountPane extends JFXDialogLayout {
                 classPropertyFor(cboServers, "jfx-combo-box-warning").bind(noServers);
                 classPropertyFor(cboServers, "jfx-combo-box").bind(noServers.not());
                 HBox.setHgrow(cboServers, Priority.ALWAYS);
+                HBox.setMargin(cboServers, new Insets(0, 10, 0, 0));
                 cboServers.setMaxWidth(Double.MAX_VALUE);
 
                 HBox linksContainer = new HBox();
                 linksContainer.setAlignment(Pos.CENTER);
-                linksContainer.setPadding(new Insets(0, 5, 0, 15));
                 onChangeAndOperate(cboServers.valueProperty(), server -> linksContainer.getChildren().setAll(createHyperlinks(server)));
                 linksContainer.setMinWidth(USE_PREF_SIZE);
 
                 JFXButton btnAddServer = new JFXButton();
-                btnAddServer.setGraphic(SVG.plus(null, 20, 20));
+                btnAddServer.setGraphic(SVG.plus(Theme.blackFillBinding(), 20, 20));
                 btnAddServer.getStyleClass().add("toggle-icon4");
                 btnAddServer.setOnAction(e -> {
                     Controllers.dialog(new AddAuthlibInjectorServerPane());
                 });
 
-                JFXButton btnManageServers = new JFXButton();
-                btnManageServers.setGraphic(SVG.gear(null, 20, 20));
-                btnManageServers.getStyleClass().add("toggle-icon4");
-                btnManageServers.setOnAction(e -> {
-                    fireEvent(new DialogCloseEvent());
-                    Controllers.navigate(Controllers.getServersPage());
-                });
-
-                HBox boxServers = new HBox(cboServers, linksContainer, btnAddServer, btnManageServers);
+                HBox boxServers = new HBox(cboServers, linksContainer, btnAddServer);
                 add(boxServers, 1, rowIndex);
 
                 rowIndex++;
@@ -372,6 +396,42 @@ public class CreateAccountPane extends JFXDialogLayout {
                 rowIndex++;
             }
 
+            if (factory instanceof OfflineAccountFactory) {
+                HBox box = new HBox();
+                MenuUpDownButton advancedButton = new MenuUpDownButton();
+                box.getChildren().setAll(advancedButton);
+                advancedButton.setText(i18n("settings.advanced"));
+                GridPane.setColumnSpan(box, 2);
+                add(box, 0, rowIndex);
+
+                rowIndex++;
+
+                Label lblUUID = new Label(i18n("account.methods.offline.uuid"));
+                lblUUID.managedProperty().bind(advancedButton.selectedProperty());
+                lblUUID.visibleProperty().bind(advancedButton.selectedProperty());
+                setHalignment(lblUUID, HPos.LEFT);
+                add(lblUUID, 0, rowIndex);
+
+                txtUUID = new JFXTextField();
+                txtUUID.managedProperty().bind(advancedButton.selectedProperty());
+                txtUUID.visibleProperty().bind(advancedButton.selectedProperty());
+                txtUUID.setValidators(new UUIDValidator());
+                txtUUID.promptTextProperty().bind(BindingMapping.of(txtUsername.textProperty()).map(name -> OfflineAccountFactory.getUUIDFromUserName(name).toString()));
+                txtUUID.setOnAction(e -> onAction.run());
+                add(txtUUID, 1, rowIndex);
+
+                rowIndex++;
+
+                HintPane hintPane = new HintPane(MessageDialogPane.MessageType.WARNING);
+                hintPane.managedProperty().bind(advancedButton.selectedProperty());
+                hintPane.visibleProperty().bind(advancedButton.selectedProperty());
+                hintPane.setText(i18n("account.methods.offline.uuid.hint"));
+                GridPane.setColumnSpan(hintPane, 2);
+                add(hintPane, 0, rowIndex);
+
+                rowIndex++;
+            }
+
             valid = new BooleanBinding() {
                 {
                     if (cboServers != null)
@@ -380,6 +440,8 @@ public class CreateAccountPane extends JFXDialogLayout {
                         bind(txtUsername.textProperty());
                     if (txtPassword != null)
                         bind(txtPassword.textProperty());
+                    if (txtUUID != null)
+                        bind(txtUUID.textProperty());
                 }
 
                 @Override
@@ -389,6 +451,8 @@ public class CreateAccountPane extends JFXDialogLayout {
                     if (txtUsername != null && !txtUsername.validate())
                         return false;
                     if (txtPassword != null && !txtPassword.validate())
+                        return false;
+                    if (txtUUID != null && !txtUUID.validate())
                         return false;
                     return true;
                 }
@@ -407,6 +471,16 @@ public class CreateAccountPane extends JFXDialogLayout {
             return false;
         }
 
+        public Object getAdditionalData() {
+            if (factory instanceof AuthlibInjectorAccountFactory) {
+                return getAuthServer();
+            } else if (factory instanceof OfflineAccountFactory) {
+                return txtUUID == null ? null : StringUtils.isBlank(txtUUID.getText()) ? null : UUIDTypeAdapter.fromString(txtUUID.getText());
+            } else {
+                return null;
+            }
+        }
+
         public @Nullable AuthlibInjectorServer getAuthServer() {
             return cboServers == null ? null : cboServers.getValue();
         }
@@ -421,6 +495,16 @@ public class CreateAccountPane extends JFXDialogLayout {
 
         public BooleanBinding validProperty() {
             return valid;
+        }
+
+        public void selectAuthServer(AuthlibInjectorServer authserver) {
+            cboServers.getSelectionModel().select(authserver);
+        }
+
+        public void focus() {
+            if (txtUsername != null) {
+                txtUsername.requestFocus();
+            }
         }
     }
 
@@ -481,6 +565,46 @@ public class CreateAccountPane extends JFXDialogLayout {
                 throw new NoSelectedCharacterException();
             } finally {
                 Platform.runLater(() -> fireEvent(new DialogCloseEvent()));
+            }
+        }
+    }
+
+    @Override
+    public void onDialogShown() {
+        if (detailsPane instanceof AccountDetailsInputPane) {
+            ((AccountDetailsInputPane) detailsPane).focus();
+        }
+    }
+
+    private static class UUIDValidator extends ValidatorBase {
+
+        public UUIDValidator() {
+            this(i18n("account.methods.offline.uuid.malformed"));
+        }
+
+        public UUIDValidator(@NamedArg("message") String message) {
+            super(message);
+        }
+
+        @Override
+        protected void eval() {
+            if (srcControl.get() instanceof TextInputControl) {
+                evalTextInputField();
+            }
+        }
+
+        private void evalTextInputField() {
+            TextInputControl textField = ((TextInputControl) srcControl.get());
+            if (StringUtils.isBlank(textField.getText())) {
+                hasErrors.set(false);
+                return;
+            }
+
+            try {
+                UUIDTypeAdapter.fromString(textField.getText());
+                hasErrors.set(false);
+            } catch (IllegalArgumentException ignored) {
+                hasErrors.set(true);
             }
         }
     }

@@ -149,13 +149,18 @@ public abstract class HttpRequest {
             HttpURLConnection con = createConnection();
             con.setDoOutput(true);
 
-            if (responseCodeTester != null) {
-                responseCodeTester.accept(new URL(url), con.getResponseCode());
-            }
-
             try (OutputStream os = con.getOutputStream()) {
                 os.write(bytes);
             }
+
+            if (responseCodeTester != null) {
+                responseCodeTester.accept(new URL(url), con.getResponseCode());
+            } else {
+                if (con.getResponseCode() / 100 != 2) {
+                    throw new ResponseCodeException(new URL(url), con.getResponseCode());
+                }
+            }
+
             return NetworkUtils.readData(con);
         }
     }

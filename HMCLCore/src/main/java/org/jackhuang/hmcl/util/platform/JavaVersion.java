@@ -24,10 +24,7 @@ import org.jackhuang.hmcl.util.versioning.VersionNumber;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -165,7 +162,7 @@ public final class JavaVersion {
         CURRENT_JAVA = new JavaVersion(
                 currentExecutable,
                 System.getProperty("java.version"),
-                Platform.PLATFORM);
+                Platform.getPlatform());
     }
 
     private static Collection<JavaVersion> JAVAS;
@@ -232,20 +229,23 @@ public final class JavaVersion {
         switch (OperatingSystem.CURRENT_OS) {
 
             case WINDOWS:
+                Path programFiles = Paths.get(Optional.ofNullable(System.getenv("ProgramFiles")).orElse("C:\\Program Files"));
+                Path programFilesX86 = Paths.get(Optional.ofNullable(System.getenv("ProgramFiles(x86)")).orElse("C:\\Program Files (x86)"));
+
                 javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\Java Runtime Environment\\").stream().map(JavaVersion::getExecutable));
                 javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\Java Development Kit\\").stream().map(JavaVersion::getExecutable));
                 javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\JRE\\").stream().map(JavaVersion::getExecutable));
                 javaExecutables.add(queryJavaHomesInRegistryKey("HKEY_LOCAL_MACHINE\\SOFTWARE\\JavaSoft\\JDK\\").stream().map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\Java")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\BellSoft")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\AdoptOpenJDK")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\Zulu")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files\\Microsoft")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\Java")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\BellSoft")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\AdoptOpenJDK")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\Zulu")).map(JavaVersion::getExecutable));
-                javaExecutables.add(listDirectory(Paths.get("C:\\Program Files (x86)\\Microsoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFiles.resolve("Java")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFiles.resolve("BellSoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFiles.resolve("AdoptOpenJDK")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFiles.resolve("Zulu")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFiles.resolve("Microsoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFilesX86.resolve("Java")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFilesX86.resolve("BellSoft")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFilesX86.resolve("AdoptOpenJDK")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFilesX86.resolve("Zulu")).map(JavaVersion::getExecutable));
+                javaExecutables.add(listDirectory(programFilesX86.resolve("Microsoft")).map(JavaVersion::getExecutable));
                 if (System.getenv("PATH") != null) {
                     javaExecutables.add(Arrays.stream(System.getenv("PATH").split(";")).map(path -> Paths.get(path, "java.exe")));
                 }
@@ -291,7 +291,13 @@ public final class JavaVersion {
 
     private static Stream<Path> listDirectory(Path directory) throws IOException {
         if (Files.isDirectory(directory)) {
-            return Files.list(directory);
+            try (final DirectoryStream<Path> subDirs = Files.newDirectoryStream(directory)) {
+                final ArrayList<Path> paths = new ArrayList<>();
+                for (Path subDir : subDirs) {
+                    paths.add(subDir);
+                }
+                return paths.stream();
+            }
         } else {
             return Stream.empty();
         }
