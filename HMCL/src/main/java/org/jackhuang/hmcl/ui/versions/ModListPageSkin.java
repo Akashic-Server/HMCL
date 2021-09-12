@@ -35,6 +35,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import org.jackhuang.hmcl.mod.ModInfo;
+import org.jackhuang.hmcl.mod.ModManager;
 import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
@@ -43,6 +44,7 @@ import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
 import org.jackhuang.hmcl.ui.construct.*;
 import org.jackhuang.hmcl.util.StringUtils;
+import org.jackhuang.hmcl.util.i18n.I18n;
 import org.jackhuang.hmcl.util.io.CompressingUtils;
 import org.jackhuang.hmcl.util.io.FileUtils;
 import org.jackhuang.hmcl.util.io.NetworkUtils;
@@ -53,6 +55,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 
 import static org.jackhuang.hmcl.ui.FXUtils.onEscPressed;
 import static org.jackhuang.hmcl.ui.ToolbarListPageSkin.createToolbarButton2;
@@ -122,6 +125,7 @@ class ModListPageSkin extends SkinBase<ModListPage> {
         private final BooleanProperty active;
         private final ModInfo modInfo;
         private final String message;
+        private final ModTranslations.Mod mod;
 
         ModInfoObject(ModInfo modInfo) {
             this.modInfo = modInfo;
@@ -134,6 +138,7 @@ class ModListPageSkin extends SkinBase<ModListPage> {
             if (isNotBlank(modInfo.getAuthors()))
                 message.append(", ").append(i18n("archive.author")).append(": ").append(modInfo.getAuthors());
             this.message = message.toString();
+            this.mod = ModTranslations.getModById(modInfo.getId());
         }
 
         String getTitle() {
@@ -146,6 +151,10 @@ class ModListPageSkin extends SkinBase<ModListPage> {
 
         ModInfo getModInfo() {
             return modInfo;
+        }
+
+        public ModTranslations.Mod getMod() {
+            return mod;
         }
 
         @Override
@@ -194,36 +203,54 @@ class ModListPageSkin extends SkinBase<ModListPage> {
             Label description = new Label(modInfo.getModInfo().getDescription().toString());
             setBody(description);
 
-            JFXButton okButton = new JFXButton();
-            okButton.getStyleClass().add("dialog-accept");
-            okButton.setText(i18n("button.ok"));
-            okButton.setOnAction(e -> fireEvent(new DialogCloseEvent()));
-
-            JFXButton searchButton = new JFXButton();
-            searchButton.getStyleClass().add("dialog-cancel");
-            searchButton.setText(i18n("mods.mcmod.search"));
-            searchButton.setOnAction(e -> {
-                fireEvent(new DialogCloseEvent());
-                FXUtils.openLink(NetworkUtils.withQuery("https://search.mcmod.cn/s", mapOf(
-                        pair("key", modInfo.getModInfo().getName()),
-                        pair("site", "all"),
-                        pair("filter", "0")
-                )));
-            });
-
             if (StringUtils.isNotBlank(modInfo.getModInfo().getUrl())) {
-                JFXButton officialPageButton = new JFXButton();
-                officialPageButton.getStyleClass().add("dialog-cancel");
+                JFXHyperlink officialPageButton = new JFXHyperlink();
                 officialPageButton.setText(i18n("mods.url"));
                 officialPageButton.setOnAction(e -> {
                     fireEvent(new DialogCloseEvent());
                     FXUtils.openLink(modInfo.getModInfo().getUrl());
                 });
 
-                setActions(okButton, officialPageButton, searchButton);
-            } else {
-                setActions(okButton, searchButton);
+                getActions().add(officialPageButton);
             }
+
+            if (modInfo.getMod() != null && StringUtils.isNotBlank(modInfo.getMod().getMcbbs())) {
+                JFXHyperlink mcbbsButton = new JFXHyperlink();
+                mcbbsButton.setText(i18n("mods.mcbbs"));
+                mcbbsButton.setOnAction(e -> {
+                    fireEvent(new DialogCloseEvent());
+                    FXUtils.openLink(ModManager.getMcbbsUrl(modInfo.getMod().getMcbbs()));
+                });
+                getActions().add(mcbbsButton);
+            }
+
+            if (modInfo.getMod() == null || StringUtils.isBlank(modInfo.getMod().getMcmod())) {
+                JFXHyperlink searchButton = new JFXHyperlink();
+                searchButton.setText(i18n("mods.mcmod.search"));
+                searchButton.setOnAction(e -> {
+                    fireEvent(new DialogCloseEvent());
+                    FXUtils.openLink(NetworkUtils.withQuery("https://search.mcmod.cn/s", mapOf(
+                            pair("key", modInfo.getModInfo().getName()),
+                            pair("site", "all"),
+                            pair("filter", "0")
+                    )));
+                });
+                getActions().add(searchButton);
+            } else {
+                JFXHyperlink mcmodButton = new JFXHyperlink();
+                mcmodButton.setText(i18n("mods.mcmod.page"));
+                mcmodButton.setOnAction(e -> {
+                    fireEvent(new DialogCloseEvent());
+                    FXUtils.openLink(ModManager.getMcmodUrl(modInfo.getMod().getMcmod()));
+                });
+                getActions().add(mcmodButton);
+            }
+
+            JFXButton okButton = new JFXButton();
+            okButton.getStyleClass().add("dialog-accept");
+            okButton.setText(i18n("button.ok"));
+            okButton.setOnAction(e -> fireEvent(new DialogCloseEvent()));
+            getActions().add(okButton);
 
             onEscPressed(this, okButton::fire);
         }
@@ -259,7 +286,12 @@ class ModListPageSkin extends SkinBase<ModListPage> {
         @Override
         protected void updateControl(ModInfoObject dataItem, boolean empty) {
             if (empty) return;
-            content.setTitle(dataItem.getTitle());
+            if (dataItem.getMod() != null && I18n.getCurrentLocale().getLocale() == Locale.CHINA) {
+                content.setTitle(dataItem.getMod().getDisplayName());
+                content.getTags().setAll(dataItem.getTitle());
+            } else {
+                content.setTitle(dataItem.getTitle());
+            }
             content.setSubtitle(dataItem.getSubtitle());
             if (booleanProperty != null) {
                 checkBox.selectedProperty().unbindBidirectional(booleanProperty);

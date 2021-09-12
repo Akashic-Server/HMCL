@@ -99,7 +99,7 @@ public final class ModManager {
             default:
                 throw new IllegalArgumentException("File " + modFile + " is not a mod file.");
         }
-        return new ModInfo(this, modFile, FileUtils.getNameWithoutExtension(modFile), new ModInfo.Description(description));
+        return new ModInfo(this, modFile, null, FileUtils.getNameWithoutExtension(modFile), new ModInfo.Description(description));
     }
 
     public void refreshMods() throws IOException {
@@ -190,6 +190,14 @@ public final class ModManager {
 
     public Path getSimpleModPath(String fileName) {
         return getModsDirectory().resolve(fileName);
+    }
+
+    public static String getMcmodUrl(String mcmodId) {
+        return String.format("https://www.mcmod.cn/class/%s.html", mcmodId);
+    }
+
+    public static String getMcbbsUrl(String mcbbsId) {
+        return String.format("https://www.mcbbs.net/thread-%s-1-1.html", mcbbsId);
     }
 
     public static final String DISABLED_EXTENSION = ".disabled";
