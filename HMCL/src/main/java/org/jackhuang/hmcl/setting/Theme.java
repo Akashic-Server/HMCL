@@ -39,6 +39,7 @@ import static org.jackhuang.hmcl.setting.ConfigHolder.config;
 @JsonAdapter(Theme.TypeAdapter.class)
 public class Theme {
     public static final Theme BLUE = new Theme("blue", "#5C6BC0");
+    public static final Theme PINK = new Theme("pink", "#E91E63");
     public static final Color BLACK = Color.web("#292929");
     public static final Color[] SUGGESTED_COLORS = new Color[]{
             Color.web("#3D6DA3"), // blue
@@ -172,7 +173,7 @@ public class Theme {
 
         @Override
         public Theme read(JsonReader in) throws IOException {
-            return getTheme(in.nextString()).orElse(Theme.BLUE);
+            return getTheme(in.nextString()).orElse(Theme.PINK);
         }
     }
 }
