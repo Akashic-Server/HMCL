@@ -18,65 +18,68 @@
 package org.jackhuang.hmcl.ui.versions;
 
 import com.jfoenix.controls.JFXButton;
-import com.jfoenix.controls.JFXListView;
+import com.jfoenix.controls.JFXScrollPane;
 import javafx.beans.binding.Bindings;
-import javafx.beans.property.*;
-import javafx.collections.FXCollections;
+import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.ReadOnlyObjectProperty;
+import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Control;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Skin;
 import javafx.scene.control.SkinBase;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.StackPane;
+import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
-import org.jackhuang.hmcl.game.GameVersion;
 import org.jackhuang.hmcl.mod.ModManager;
-import org.jackhuang.hmcl.mod.curse.CurseAddon;
-import org.jackhuang.hmcl.mod.curse.CurseModManager;
+import org.jackhuang.hmcl.mod.RemoteMod;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.task.FileDownloadTask;
+import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
 import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
-import org.jackhuang.hmcl.ui.construct.FloatListCell;
-import org.jackhuang.hmcl.ui.construct.JFXHyperlink;
-import org.jackhuang.hmcl.ui.construct.SpinnerPane;
-import org.jackhuang.hmcl.ui.construct.TwoLineListItem;
+import org.jackhuang.hmcl.ui.construct.*;
 import org.jackhuang.hmcl.ui.decorator.DecoratorPage;
+import org.jackhuang.hmcl.util.SimpleMultimap;
 import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.io.NetworkUtils;
+import org.jackhuang.hmcl.util.versioning.VersionNumber;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
 public class DownloadPage extends Control implements DecoratorPage {
     private final ReadOnlyObjectWrapper<State> state = new ReadOnlyObjectWrapper<>();
-    private final ListProperty<CurseAddon.LatestFile> items = new SimpleListProperty<>(this, "items", FXCollections.observableArrayList());
+    private final BooleanProperty loaded = new SimpleBooleanProperty(false);
     private final BooleanProperty loading = new SimpleBooleanProperty(false);
     private final BooleanProperty failed = new SimpleBooleanProperty(false);
-    private final CurseAddon addon;
+    private final RemoteMod addon;
     private final ModTranslations.Mod mod;
     private final Profile.ProfileVersion version;
     private final DownloadCallback callback;
+    private final DownloadListPage page;
 
-    public DownloadPage(CurseAddon addon, Profile.ProfileVersion version, @Nullable DownloadCallback callback) {
+    private List<RemoteMod> dependencies;
+    private SimpleMultimap<String, RemoteMod.Version> versions;
+
+    public DownloadPage(DownloadListPage page, RemoteMod addon, Profile.ProfileVersion version, @Nullable DownloadCallback callback) {
+        this.page = page;
         this.addon = addon;
         this.mod = ModTranslations.getModByCurseForgeId(addon.getSlug());
         this.version = version;
@@ -86,27 +89,60 @@ public class DownloadPage extends Control implements DecoratorPage {
                 ? version.getProfile().getRepository().getVersionJar(version.getVersion())
                 : null;
 
-        Task.runAsync(() -> {
-            if (StringUtils.isNotBlank(version.getVersion())) {
-                Optional<String> gameVersion = GameVersion.minecraftVersion(versionJar);
-                if (gameVersion.isPresent()) {
-                    List<CurseAddon.LatestFile> files = CurseModManager.getFiles(addon);
-                    items.setAll(files.stream()
-                            .filter(file -> file.getGameVersion().contains(gameVersion.get()))
-                            .sorted(Comparator.comparing(CurseAddon.LatestFile::getParsedFileDate).reversed())
-                            .collect(Collectors.toList()));
-                    return;
-                }
-            }
-            List<CurseAddon.LatestFile> files = CurseModManager.getFiles(addon);
-            files.sort(Comparator.comparing(CurseAddon.LatestFile::getParsedFileDate).reversed());
-            items.setAll(files);
-        }).start();
+        setLoading(true);
+        setFailed(false);
 
-        this.state.set(State.fromTitle(addon.getName()));
+        Task.allOf(
+                        Task.supplyAsync(() -> addon.getData().loadDependencies()),
+                        Task.supplyAsync(() -> {
+                            Stream<RemoteMod.Version> versions = addon.getData().loadVersions();
+//                            if (StringUtils.isNotBlank(version.getVersion())) {
+//                                Optional<String> gameVersion = GameVersion.minecraftVersion(versionJar);
+//                                if (gameVersion.isPresent()) {
+//                                    return sortVersions(
+//                                            .filter(file -> file.getGameVersions().contains(gameVersion.get())));
+//                                }
+//                            }
+                            return sortVersions(versions);
+                        }))
+                .whenComplete(Schedulers.javafx(), (result, exception) -> {
+                    if (exception == null) {
+                        @SuppressWarnings("unchecked")
+                        List<RemoteMod> dependencies = (List<RemoteMod>) result.get(0);
+                        @SuppressWarnings("unchecked")
+                        SimpleMultimap<String, RemoteMod.Version> versions = (SimpleMultimap<String, RemoteMod.Version>) result.get(1);
+
+                        this.dependencies = dependencies;
+                        this.versions = versions;
+
+                        loaded.set(true);
+                        setFailed(false);
+                    } else {
+                        setFailed(true);
+                    }
+                    setLoading(false);
+                }).start();
+
+        this.state.set(State.fromTitle(addon.getTitle()));
     }
 
-    public CurseAddon getAddon() {
+    private SimpleMultimap<String, RemoteMod.Version> sortVersions(Stream<RemoteMod.Version> versions) {
+        SimpleMultimap<String, RemoteMod.Version> classifiedVersions
+                = new SimpleMultimap<String, RemoteMod.Version>(HashMap::new, ArrayList::new);
+        versions.forEach(version -> {
+            for (String gameVersion : version.getGameVersions()) {
+                classifiedVersions.put(gameVersion, version);
+            }
+        });
+
+        for (String gameVersion : classifiedVersions.keys()) {
+            List<RemoteMod.Version> versionList = (List<RemoteMod.Version>) classifiedVersions.get(gameVersion);
+            versionList.sort(Comparator.comparing(RemoteMod.Version::getDatePublished).reversed());
+        }
+        return classifiedVersions;
+    }
+
+    public RemoteMod getAddon() {
         return addon;
     }
 
@@ -138,7 +174,7 @@ public class DownloadPage extends Control implements DecoratorPage {
         this.failed.set(failed);
     }
 
-    public void download(CurseAddon.LatestFile file) {
+    public void download(RemoteMod.Version file) {
         if (this.callback == null) {
             saveAs(file);
         } else {
@@ -146,20 +182,20 @@ public class DownloadPage extends Control implements DecoratorPage {
         }
     }
 
-    public void saveAs(CurseAddon.LatestFile file) {
-        String extension = StringUtils.substringAfterLast(file.getFileName(), '.');
+    public void saveAs(RemoteMod.Version file) {
+        String extension = StringUtils.substringAfterLast(file.getFile().getFilename(), '.');
 
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle(i18n("button.save_as"));
         fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(i18n("file"), "*." + extension));
-        fileChooser.setInitialFileName(file.getFileName());
+        fileChooser.setInitialFileName(file.getFile().getFilename());
         File dest = fileChooser.showSaveDialog(Controllers.getStage());
         if (dest == null) {
             return;
         }
 
         Controllers.taskDialog(
-                new FileDownloadTask(NetworkUtils.toURL(file.getDownloadUrl()), dest).executor(true),
+                new FileDownloadTask(NetworkUtils.toURL(file.getFile().getUrl()), dest).executor(true),
                 i18n("message.downloading")
         );
     }
@@ -179,51 +215,79 @@ public class DownloadPage extends Control implements DecoratorPage {
         protected ModDownloadPageSkin(DownloadPage control) {
             super(control);
 
-            BorderPane pane = new BorderPane();
+            VBox pane = new VBox(8);
+            pane.getStyleClass().add("gray-background");
+            pane.setPadding(new Insets(10));
+            ScrollPane scrollPane = new ScrollPane(pane);
+            JFXScrollPane.smoothScrolling(scrollPane);
+            scrollPane.setFitToWidth(true);
+            scrollPane.setFitToHeight(true);
 
             HBox descriptionPane = new HBox(8);
             descriptionPane.setAlignment(Pos.CENTER);
-            pane.setTop(descriptionPane);
-            descriptionPane.getStyleClass().add("card");
+            pane.getChildren().add(descriptionPane);
+            descriptionPane.getStyleClass().add("card-non-transparent");
             BorderPane.setMargin(descriptionPane, new Insets(11, 11, 0, 11));
-
-            ImageView imageView = new ImageView();
-            for (CurseAddon.Attachment attachment : getSkinnable().addon.getAttachments()) {
-                if (attachment.isDefault()) {
-                    imageView.setImage(new Image(attachment.getThumbnailUrl(), 40, 40, true, true, true));
+            {
+                ImageView imageView = new ImageView();
+                if (StringUtils.isNotBlank(getSkinnable().addon.getIconUrl())) {
+                    imageView.setImage(new Image(getSkinnable().addon.getIconUrl(), 40, 40, true, true, true));
                 }
-            }
-            descriptionPane.getChildren().add(FXUtils.limitingSize(imageView, 40, 40));
+                descriptionPane.getChildren().add(FXUtils.limitingSize(imageView, 40, 40));
 
-            TwoLineListItem content = new TwoLineListItem();
-            HBox.setHgrow(content, Priority.ALWAYS);
-            ModTranslations.Mod mod = ModTranslations.getModByCurseForgeId(getSkinnable().addon.getSlug());
-            content.setTitle(mod != null ? mod.getDisplayName() : getSkinnable().addon.getName());
-            content.setSubtitle(getSkinnable().addon.getSummary());
-            content.getTags().setAll(getSkinnable().addon.getCategories().stream()
-                    .map(category -> i18n("curse.category." + category.getCategoryId()))
-                    .collect(Collectors.toList()));
-            descriptionPane.getChildren().add(content);
+                TwoLineListItem content = new TwoLineListItem();
+                HBox.setHgrow(content, Priority.ALWAYS);
+                ModTranslations.Mod mod = ModTranslations.getModByCurseForgeId(getSkinnable().addon.getSlug());
+                content.setTitle(mod != null ? mod.getDisplayName() : getSkinnable().addon.getTitle());
+                content.setSubtitle(getSkinnable().addon.getDescription());
+                content.getTags().setAll(getSkinnable().addon.getCategories().stream()
+                        .map(category -> getSkinnable().page.getLocalizedCategory(category))
+                        .collect(Collectors.toList()));
+                descriptionPane.getChildren().add(content);
 
-            if (getSkinnable().mod != null) {
-                JFXHyperlink openMcmodButton = new JFXHyperlink(i18n("mods.mcmod"));
-                openMcmodButton.setOnAction(e -> FXUtils.openLink(ModManager.getMcmodUrl(getSkinnable().mod.getMcmod())));
-                descriptionPane.getChildren().add(openMcmodButton);
+                if (getSkinnable().mod != null) {
+                    JFXHyperlink openMcmodButton = new JFXHyperlink(i18n("mods.mcmod"));
+                    openMcmodButton.setOnAction(e -> FXUtils.openLink(ModManager.getMcmodUrl(getSkinnable().mod.getMcmod())));
+                    descriptionPane.getChildren().add(openMcmodButton);
 
-                if (StringUtils.isNotBlank(getSkinnable().mod.getMcbbs())) {
-                    JFXHyperlink openMcbbsButton = new JFXHyperlink(i18n("mods.mcbbs"));
-                    openMcbbsButton.setOnAction(e -> FXUtils.openLink(ModManager.getMcbbsUrl(getSkinnable().mod.getMcbbs())));
-                    descriptionPane.getChildren().add(openMcbbsButton);
+                    if (StringUtils.isNotBlank(getSkinnable().mod.getMcbbs())) {
+                        JFXHyperlink openMcbbsButton = new JFXHyperlink(i18n("mods.mcbbs"));
+                        openMcbbsButton.setOnAction(e -> FXUtils.openLink(ModManager.getMcbbsUrl(getSkinnable().mod.getMcbbs())));
+                        descriptionPane.getChildren().add(openMcbbsButton);
+                    }
                 }
+
+                JFXHyperlink openUrlButton = new JFXHyperlink(control.page.getLocalizedOfficialPage());
+                openUrlButton.setOnAction(e -> FXUtils.openLink(getSkinnable().addon.getPageUrl()));
+                descriptionPane.getChildren().add(openUrlButton);
             }
 
-            JFXHyperlink openUrlButton = new JFXHyperlink(i18n("mods.curseforge"));
-            openUrlButton.setOnAction(e -> FXUtils.openLink(getSkinnable().addon.getWebsiteUrl()));
-            descriptionPane.getChildren().add(openUrlButton);
+            {
+                ComponentList dependencyPane = new ComponentList();
+                dependencyPane.getStyleClass().add("no-padding");
 
+                FXUtils.onChangeAndOperate(control.loaded, loaded -> {
+                    if (loaded) {
+                        dependencyPane.getContent().setAll(control.dependencies.stream()
+                                .map(dependency -> new DependencyModItem(getSkinnable().page, dependency, control.version, control.callback))
+                                .collect(Collectors.toList()));
+                    }
+                });
+
+                Node title = ComponentList.createComponentListTitle(i18n("mods.dependencies"));
+
+                BooleanBinding show = Bindings.createBooleanBinding(() -> !control.dependencies.isEmpty(), control.loaded);
+                title.managedProperty().bind(show);
+                title.visibleProperty().bind(show);
+                dependencyPane.managedProperty().bind(show);
+                dependencyPane.visibleProperty().bind(show);
+
+                pane.getChildren().addAll(title, dependencyPane);
+            }
 
             SpinnerPane spinnerPane = new SpinnerPane();
-            pane.setCenter(spinnerPane);
+            VBox.setVgrow(spinnerPane, Priority.ALWAYS);
+            pane.getChildren().add(spinnerPane);
             {
                 spinnerPane.loadingProperty().bind(getSkinnable().loadingProperty());
                 spinnerPane.failedReasonProperty().bind(Bindings.createStringBinding(() -> {
@@ -234,78 +298,107 @@ public class DownloadPage extends Control implements DecoratorPage {
                     }
                 }, getSkinnable().failedProperty()));
 
-                JFXListView<CurseAddon.LatestFile> listView = new JFXListView<>();
-                spinnerPane.setContent(listView);
-                Bindings.bindContent(listView.getItems(), getSkinnable().items);
-                listView.setCellFactory(x -> new FloatListCell<CurseAddon.LatestFile>(listView) {
-                    TwoLineListItem content = new TwoLineListItem();
-                    StackPane graphicPane = new StackPane();
-                    JFXButton saveAsButton = new JFXButton();
+                ComponentList list = new ComponentList();
+                StackPane.setAlignment(list, Pos.TOP_CENTER);
+                spinnerPane.setContent(list);
 
-                    {
-                        HBox container = new HBox(8);
-                        container.setAlignment(Pos.CENTER_LEFT);
-                        pane.getChildren().add(container);
+                FXUtils.onChangeAndOperate(control.loaded, loaded -> {
+                    if (control.versions == null) return;
 
-                        saveAsButton.getStyleClass().add("toggle-icon4");
-                        saveAsButton.setGraphic(SVG.contentSaveMoveOutline(Theme.blackFillBinding(), -1, -1));
+                    for (String gameVersion : control.versions.keys().stream()
+                            .sorted(VersionNumber.VERSION_COMPARATOR.reversed())
+                            .collect(Collectors.toList())) {
+                        ComponentList sublist = new ComponentList();
+                        sublist.setLazyInitializer(self -> {
+                            self.getContent().setAll(control.versions.get(gameVersion).stream()
+                                    .map(version -> new ModItem(version, control))
+                                    .collect(Collectors.toList()));
+                        });
+                        sublist.getStyleClass().add("no-padding");
+                        sublist.setTitle(gameVersion);
 
-                        HBox.setHgrow(content, Priority.ALWAYS);
-                        container.getChildren().setAll(graphicPane, content, saveAsButton);
+                        list.getContent().add(sublist);
                     }
-
-                    @Override
-                    protected void updateControl(CurseAddon.LatestFile dataItem, boolean empty) {
-                        if (empty) return;
-                        content.setTitle(dataItem.getDisplayName());
-                        content.setSubtitle(FORMATTER.format(dataItem.getParsedFileDate()));
-                        content.getTags().setAll(dataItem.getGameVersion());
-                        saveAsButton.setOnMouseClicked(e -> getSkinnable().saveAs(dataItem));
-
-                        switch (dataItem.getReleaseType()) {
-                            case 1: // release
-                                graphicPane.getChildren().setAll(SVG.releaseCircleOutline(Theme.blackFillBinding(), 24, 24));
-                                content.getTags().add(i18n("version.game.release"));
-                                break;
-                            case 2: // beta
-                                graphicPane.getChildren().setAll(SVG.betaCircleOutline(Theme.blackFillBinding(), 24, 24));
-                                content.getTags().add(i18n("version.game.snapshot"));
-                                break;
-                            case 3: // alpha
-                                graphicPane.getChildren().setAll(SVG.alphaCircleOutline(Theme.blackFillBinding(), 24, 24));
-                                content.getTags().add(i18n("version.game.snapshot"));
-                                break;
-                        }
-                    }
-                });
-
-                listView.setOnMouseClicked(e -> {
-                    if (listView.getSelectionModel().getSelectedIndex() < 0)
-                        return;
-                    CurseAddon.LatestFile selectedItem = listView.getSelectionModel().getSelectedItem();
-                    getSkinnable().download(selectedItem);
                 });
             }
 
-            getChildren().setAll(pane);
+            getChildren().setAll(scrollPane);
+        }
+    }
+
+    private static final class DependencyModItem extends StackPane {
+
+        DependencyModItem(DownloadListPage page, RemoteMod addon, Profile.ProfileVersion version, DownloadCallback callback) {
+            HBox pane = new HBox(8);
+            pane.setPadding(new Insets(8));
+            pane.setAlignment(Pos.CENTER_LEFT);
+            TwoLineListItem content = new TwoLineListItem();
+            HBox.setHgrow(content, Priority.ALWAYS);
+            ImageView imageView = new ImageView();
+            pane.getChildren().setAll(FXUtils.limitingSize(imageView, 40, 40), content);
+
+            RipplerContainer container = new RipplerContainer(pane);
+            container.setOnMouseClicked(e -> Controllers.navigate(new DownloadPage(page, addon, version, callback)));
+            getChildren().setAll(container);
+
+            ModTranslations.Mod mod = ModTranslations.getModByCurseForgeId(addon.getSlug());
+            content.setTitle(mod != null ? mod.getDisplayName() : addon.getTitle());
+            content.setSubtitle(addon.getDescription());
+            content.getTags().setAll(addon.getCategories().stream()
+                    .map(page::getLocalizedCategory)
+                    .collect(Collectors.toList()));
+
+            if (StringUtils.isNotBlank(addon.getIconUrl())) {
+                imageView.setImage(new Image(addon.getIconUrl(), 40, 40, true, true, true));
+            }
+        }
+    }
+
+    private static final class ModItem extends StackPane {
+        ModItem(RemoteMod.Version dataItem, DownloadPage selfPage) {
+            HBox pane = new HBox(8);
+            pane.setPadding(new Insets(8));
+            pane.setAlignment(Pos.CENTER_LEFT);
+            TwoLineListItem content = new TwoLineListItem();
+            StackPane graphicPane = new StackPane();
+            JFXButton saveAsButton = new JFXButton();
+
+            RipplerContainer container = new RipplerContainer(pane);
+            container.setOnMouseClicked(e -> {
+                selfPage.download(dataItem);
+            });
+            getChildren().setAll(container);
+
+            saveAsButton.getStyleClass().add("toggle-icon4");
+            saveAsButton.setGraphic(SVG.contentSaveMoveOutline(Theme.blackFillBinding(), -1, -1));
+
+            HBox.setHgrow(content, Priority.ALWAYS);
+            pane.getChildren().setAll(graphicPane, content, saveAsButton);
+
+            content.setTitle(dataItem.getName());
+            content.setSubtitle(FORMATTER.format(dataItem.getDatePublished()));
+            saveAsButton.setOnMouseClicked(e -> selfPage.saveAs(dataItem));
+
+            switch (dataItem.getVersionType()) {
+                case Release:
+                    graphicPane.getChildren().setAll(SVG.releaseCircleOutline(Theme.blackFillBinding(), 24, 24));
+                    content.getTags().add(i18n("version.game.release"));
+                    break;
+                case Beta:
+                    graphicPane.getChildren().setAll(SVG.betaCircleOutline(Theme.blackFillBinding(), 24, 24));
+                    content.getTags().add(i18n("version.game.snapshot"));
+                    break;
+                case Alpha:
+                    graphicPane.getChildren().setAll(SVG.alphaCircleOutline(Theme.blackFillBinding(), 24, 24));
+                    content.getTags().add(i18n("version.game.snapshot"));
+                    break;
+            }
         }
     }
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.FULL).withLocale(Locale.getDefault()).withZone(ZoneId.systemDefault());
 
-    public interface Project {
-
-    }
-
-    public interface ProjectVersion {
-
-    }
-
-    public interface DownloadSource {
-
-    }
-
     public interface DownloadCallback {
-        void download(Profile profile, @Nullable String version, CurseAddon.LatestFile file);
+        void download(Profile profile, @Nullable String version, RemoteMod.Version file);
     }
 }

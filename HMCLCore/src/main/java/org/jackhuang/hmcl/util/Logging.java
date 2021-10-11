@@ -1,6 +1,6 @@
 /*
  * Hello Minecraft! Launcher
- * Copyright (C) 2020  huangyuhui <huanghongxun2008@126.com> and contributors
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,6 +20,7 @@ package org.jackhuang.hmcl.util;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.SimpleDateFormat;
@@ -27,7 +28,6 @@ import java.util.Date;
 import java.util.logging.*;
 
 /**
- *
  * @author huangyuhui
  */
 public final class Logging {
@@ -63,8 +63,23 @@ public final class Logging {
                 flush();
             }
         };
+        try {
+            streamHandler.setEncoding("UTF-8");
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
         streamHandler.setLevel(Level.ALL);
         LOG.addHandler(streamHandler);
+    }
+
+    public static void initForTest() {
+        LOG.setLevel(Level.ALL);
+        LOG.setUseParentHandlers(false);
+
+        ConsoleHandler consoleHandler = new ConsoleHandler();
+        consoleHandler.setFormatter(DefaultFormatter.INSTANCE);
+        consoleHandler.setLevel(Level.FINER);
+        LOG.addHandler(consoleHandler);
     }
 
     public static byte[] getRawLogs() {

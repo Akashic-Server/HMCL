@@ -24,6 +24,7 @@ import com.google.gson.JsonSyntaxException;
 
 import java.io.File;
 import java.lang.reflect.Type;
+import java.time.Instant;
 import java.util.Date;
 import java.util.UUID;
 
@@ -33,6 +34,12 @@ import java.util.UUID;
 public final class JsonUtils {
 
     public static final Gson GSON = defaultGsonBuilder().create();
+
+    public static final Gson UGLY_GSON = new GsonBuilder()
+            .registerTypeAdapterFactory(JsonTypeAdapterFactory.INSTANCE)
+            .registerTypeAdapterFactory(ValidationTypeAdapterFactory.INSTANCE)
+            .registerTypeAdapterFactory(LowerCaseEnumTypeAdapterFactory.INSTANCE)
+            .create();
 
     private JsonUtils() {
     }
@@ -59,10 +66,19 @@ public final class JsonUtils {
         }
     }
 
+    public static <T> T fromMaybeMalformedJson(String json, Type type) throws JsonParseException {
+        try {
+            return GSON.fromJson(json, type);
+        } catch (JsonSyntaxException e) {
+            return null;
+        }
+    }
+
     public static GsonBuilder defaultGsonBuilder() {
         return new GsonBuilder()
                 .enableComplexMapKeySerialization()
                 .setPrettyPrinting()
+                .registerTypeAdapter(Instant.class, InstantTypeAdapter.INSTANCE)
                 .registerTypeAdapter(Date.class, DateTypeAdapter.INSTANCE)
                 .registerTypeAdapter(UUID.class, UUIDTypeAdapter.INSTANCE)
                 .registerTypeAdapter(File.class, FileTypeAdapter.INSTANCE)

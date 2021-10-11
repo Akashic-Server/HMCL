@@ -22,42 +22,34 @@ import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.property.*;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Node;
-import javafx.scene.control.Control;
-import javafx.scene.control.SkinBase;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
-import org.jackhuang.hmcl.mod.curse.CurseAddon;
-import org.jackhuang.hmcl.mod.curse.CurseModManager;
+import javafx.scene.layout.VBox;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.setting.Theme;
-import org.jackhuang.hmcl.task.FileDownloadTask;
-import org.jackhuang.hmcl.task.Task;
-import org.jackhuang.hmcl.task.TaskExecutor;
-import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
 import org.jackhuang.hmcl.ui.animation.ContainerAnimations;
 import org.jackhuang.hmcl.ui.animation.TransitionPane;
 import org.jackhuang.hmcl.ui.construct.*;
+import org.jackhuang.hmcl.ui.decorator.DecoratorAnimatedPage;
 import org.jackhuang.hmcl.ui.decorator.DecoratorPage;
 import org.jackhuang.hmcl.util.io.FileUtils;
-import org.jackhuang.hmcl.util.io.NetworkUtils;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.nio.file.Path;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
-public class VersionPage extends Control implements DecoratorPage, DownloadPage.DownloadCallback {
+public class VersionPage extends DecoratorAnimatedPage implements DecoratorPage {
     private final ReadOnlyObjectWrapper<State> state = new ReadOnlyObjectWrapper<>();
-    private final BooleanProperty loading = new SimpleBooleanProperty();
     private final TabHeader tab;
     private final TabHeader.Tab<VersionSettingsPage> versionSettingsTab = new TabHeader.Tab<>("versionSettingsTab");
     private final TabHeader.Tab<ModListPage> modListTab = new TabHeader.Tab<>("modListTab");
-    private final TabHeader.Tab<DownloadListPage> curseModListTab = new TabHeader.Tab<>("modListTab");
     private final TabHeader.Tab<InstallerListPage> installerListTab = new TabHeader.Tab<>("installerListTab");
     private final TabHeader.Tab<WorldListPage> worldListTab = new TabHeader.Tab<>("worldList");
     private final TransitionPane transitionPane = new TransitionPane();
@@ -67,28 +59,31 @@ public class VersionPage extends Control implements DecoratorPage, DownloadPage.
     private String preferredVersionName = null;
 
     {
-        versionSettingsTab.setNodeSupplier(VersionSettingsPage::new);
-        modListTab.setNodeSupplier(ModListPage::new);
-        curseModListTab.setNodeSupplier(() -> new DownloadListPage(CurseModManager.SECTION_MOD, this));
-        installerListTab.setNodeSupplier(InstallerListPage::new);
-        worldListTab.setNodeSupplier(WorldListPage::new);
+        versionSettingsTab.setNodeSupplier(loadVersionFor(() -> new VersionSettingsPage(false)));
+        modListTab.setNodeSupplier(loadVersionFor(ModListPage::new));
+        installerListTab.setNodeSupplier(loadVersionFor(InstallerListPage::new));
+        worldListTab.setNodeSupplier(loadVersionFor(WorldListPage::new));
 
-        tab = new TabHeader(versionSettingsTab, modListTab, curseModListTab, installerListTab, worldListTab);
+        tab = new TabHeader(versionSettingsTab, modListTab, installerListTab, worldListTab);
 
         addEventHandler(Navigator.NavigationEvent.NAVIGATED, this::onNavigated);
 
-        tab.getSelectionModel().select(versionSettingsTab);
+        tab.select(versionSettingsTab);
         FXUtils.onChangeAndOperate(tab.getSelectionModel().selectedItemProperty(), newValue -> {
-            if (newValue.initializeIfNeeded()) {
-                if (this.version.get() != null) {
-                    if (newValue.getNode() instanceof VersionLoadable) {
-                        ((VersionLoadable) newValue.getNode()).loadVersion(version.get().getProfile(), version.get().getVersion());
-                    }
-                }
-            }
-
             transitionPane.setContent(newValue.getNode(), ContainerAnimations.FADE.getAnimationProducer());
         });
+    }
+
+    private <T extends Node> Supplier<T> loadVersionFor(Supplier<T> nodeSupplier) {
+        return () -> {
+            T node = nodeSupplier.get();
+            if (version.get() != null) {
+                if (node instanceof VersionPage.VersionLoadable) {
+                    ((VersionLoadable) node).loadVersion(version.get().getProfile(), version.get().getVersion());
+                }
+            }
+            return node;
+        };
     }
 
     public void setVersion(String version, Profile profile) {
@@ -111,8 +106,6 @@ public class VersionPage extends Control implements DecoratorPage, DownloadPage.
             versionSettingsTab.getNode().loadVersion(profile, version);
         if (modListTab.isInitialized())
             modListTab.getNode().loadVersion(profile, version);
-        if (curseModListTab.isInitialized())
-            curseModListTab.getNode().loadVersion(profile, version);
         if (installerListTab.isInitialized())
             installerListTab.getNode().loadVersion(profile, version);
         if (worldListTab.isInitialized())
@@ -198,29 +191,7 @@ public class VersionPage extends Control implements DecoratorPage, DownloadPage.
         return state.getReadOnlyProperty();
     }
 
-    @Override
-    public void download(Profile profile, @Nullable String version, CurseAddon.LatestFile file) {
-        if (version == null) {
-            throw new InternalError();
-        }
-
-        Path dest = profile.getRepository().getRunDirectory(version).toPath().resolve("mods").resolve(file.getFileName());
-
-        TaskExecutorDialogPane downloadingPane = new TaskExecutorDialogPane(it -> {
-        });
-
-        TaskExecutor executor = Task.composeAsync(() -> {
-            FileDownloadTask task = new FileDownloadTask(NetworkUtils.toURL(file.getDownloadUrl()), dest.toFile());
-            task.setName(file.getDisplayName());
-            return task;
-        }).executor(false);
-
-        downloadingPane.setExecutor(executor, true);
-        Controllers.dialog(downloadingPane);
-        executor.start();
-    }
-
-    public static class Skin extends SkinBase<VersionPage> {
+    public static class Skin extends DecoratorAnimatedPageSkin<VersionPage> {
 
         /**
          * Constructor for all SkinBase instances.
@@ -230,65 +201,49 @@ public class VersionPage extends Control implements DecoratorPage, DownloadPage.
         protected Skin(VersionPage control) {
             super(control);
 
-            SpinnerPane spinnerPane = new SpinnerPane();
-            spinnerPane.getStyleClass().add("large-spinner-pane");
-
-            // the root page, with the sidebar in left, navigator in center.
-            BorderPane root = new BorderPane();
-
             {
                 BorderPane left = new BorderPane();
                 FXUtils.setLimitWidth(left, 200);
-                root.setLeft(left);
+                setLeft(left);
 
                 AdvancedListItem versionSettingsItem = new AdvancedListItem();
                 versionSettingsItem.getStyleClass().add("navigation-drawer-item");
                 versionSettingsItem.setTitle(i18n("settings.game"));
-                versionSettingsItem.setLeftGraphic(wrap(SVG.gearOutline(Theme.blackFillBinding(), 24, 24)));
+                versionSettingsItem.setLeftGraphic(wrap(SVG::gearOutline));
                 versionSettingsItem.setActionButtonVisible(false);
                 versionSettingsItem.activeProperty().bind(control.tab.getSelectionModel().selectedItemProperty().isEqualTo(control.versionSettingsTab));
-                versionSettingsItem.setOnAction(e -> control.tab.getSelectionModel().select(control.versionSettingsTab));
+                versionSettingsItem.setOnAction(e -> control.tab.select(control.versionSettingsTab));
 
                 AdvancedListItem modListItem = new AdvancedListItem();
                 modListItem.getStyleClass().add("navigation-drawer-item");
                 modListItem.setTitle(i18n("mods.manage"));
-                modListItem.setLeftGraphic(wrap(SVG.puzzle(Theme.blackFillBinding(), 24, 24)));
+                modListItem.setLeftGraphic(wrap(SVG::puzzle));
                 modListItem.setActionButtonVisible(false);
                 modListItem.activeProperty().bind(control.tab.getSelectionModel().selectedItemProperty().isEqualTo(control.modListTab));
-                modListItem.setOnAction(e -> control.tab.getSelectionModel().select(control.modListTab));
-
-                AdvancedListItem curseModListItem = new AdvancedListItem();
-                curseModListItem.getStyleClass().add("navigation-drawer-item");
-                curseModListItem.setTitle(i18n("mods.download"));
-                curseModListItem.setLeftGraphic(wrap(SVG.fire(Theme.blackFillBinding(), 24, 24)));
-                curseModListItem.setActionButtonVisible(false);
-                curseModListItem.activeProperty().bind(control.tab.getSelectionModel().selectedItemProperty().isEqualTo(control.curseModListTab));
-                curseModListItem.setOnAction(e -> control.tab.getSelectionModel().select(control.curseModListTab));
+                modListItem.setOnAction(e -> control.tab.select(control.modListTab));
 
                 AdvancedListItem installerListItem = new AdvancedListItem();
                 installerListItem.getStyleClass().add("navigation-drawer-item");
                 installerListItem.setTitle(i18n("settings.tabs.installers"));
-                installerListItem.setLeftGraphic(wrap(SVG.cube(Theme.blackFillBinding(), 24, 24)));
+                installerListItem.setLeftGraphic(wrap(SVG::cube));
                 installerListItem.setActionButtonVisible(false);
                 installerListItem.activeProperty().bind(control.tab.getSelectionModel().selectedItemProperty().isEqualTo(control.installerListTab));
-                installerListItem.setOnAction(e -> control.tab.getSelectionModel().select(control.installerListTab));
+                installerListItem.setOnAction(e -> control.tab.select(control.installerListTab));
 
                 AdvancedListItem worldListItem = new AdvancedListItem();
                 worldListItem.getStyleClass().add("navigation-drawer-item");
                 worldListItem.setTitle(i18n("world.manage"));
-                worldListItem.setLeftGraphic(wrap(SVG.earth(Theme.blackFillBinding(), 24, 24)));
+                worldListItem.setLeftGraphic(wrap(SVG::earth));
                 worldListItem.setActionButtonVisible(false);
                 worldListItem.activeProperty().bind(control.tab.getSelectionModel().selectedItemProperty().isEqualTo(control.worldListTab));
-                worldListItem.setOnAction(e -> control.tab.getSelectionModel().select(control.worldListTab));
+                worldListItem.setOnAction(e -> control.tab.select(control.worldListTab));
 
                 AdvancedListBox sideBar = new AdvancedListBox()
                         .add(versionSettingsItem)
                         .add(modListItem)
-                        .add(curseModListItem)
                         .add(installerListItem)
                         .add(worldListItem);
-                left.setCenter(sideBar);
-
+                VBox.setVgrow(sideBar, Priority.ALWAYS);
 
                 PopupMenu browseList = new PopupMenu();
                 JFXPopup browsePopup = new JFXPopup(browseList);
@@ -317,44 +272,32 @@ public class VersionPage extends Control implements DecoratorPage, DownloadPage.
                         new IconedMenuItem(null, i18n("version.manage.clean"), FXUtils.withJFXPopupClosing(control::clearJunkFiles, managementPopup)).addTooltip(i18n("version.manage.clean.tooltip"))
                 );
 
-                AdvancedListItem upgradeItem = new AdvancedListItem();
-                upgradeItem.getStyleClass().add("navigation-drawer-item");
-                upgradeItem.setTitle(i18n("version.update"));
-                upgradeItem.setLeftGraphic(wrap(SVG.update(Theme.blackFillBinding(), 24, 24)));
-                upgradeItem.setActionButtonVisible(false);
-                upgradeItem.visibleProperty().bind(control.currentVersionUpgradable);
-                upgradeItem.setOnAction(e -> control.updateGame());
-
-                AdvancedListItem testGameItem = new AdvancedListItem();
-                testGameItem.getStyleClass().add("navigation-drawer-item");
-                testGameItem.setTitle(i18n("version.launch.test"));
-                testGameItem.setLeftGraphic(wrap(SVG.rocketLaunchOutline(Theme.blackFillBinding(), 24, 24)));
-                testGameItem.setActionButtonVisible(false);
-                testGameItem.setOnAction(e -> control.testGame());
-
-                AdvancedListItem browseMenuItem = new AdvancedListItem();
-                browseMenuItem.getStyleClass().add("navigation-drawer-item");
-                browseMenuItem.setTitle(i18n("settings.game.exploration"));
-                browseMenuItem.setLeftGraphic(wrap(SVG.folderOutline(Theme.blackFillBinding(), 24, 24)));
-                browseMenuItem.setActionButtonVisible(false);
-                browseMenuItem.setOnAction(e -> browsePopup.show(browseMenuItem, JFXPopup.PopupVPosition.BOTTOM, JFXPopup.PopupHPosition.LEFT, browseMenuItem.getWidth(), 0));
-
-                AdvancedListItem managementItem = new AdvancedListItem();
-                managementItem.getStyleClass().add("navigation-drawer-item");
-                managementItem.setTitle(i18n("settings.game.management"));
-                managementItem.setLeftGraphic(wrap(SVG.wrenchOutline(Theme.blackFillBinding(), 24, 24)));
-                managementItem.setActionButtonVisible(false);
-                managementItem.setOnAction(e -> managementPopup.show(managementItem, JFXPopup.PopupVPosition.BOTTOM, JFXPopup.PopupHPosition.LEFT, managementItem.getWidth(), 0));
-
-
                 AdvancedListBox toolbar = new AdvancedListBox()
-                        .add(upgradeItem)
-                        .add(testGameItem)
-                        .add(browseMenuItem)
-                        .add(managementItem);
+                        .addNavigationDrawerItem(upgradeItem -> {
+                            upgradeItem.setTitle(i18n("version.update"));
+                            upgradeItem.setLeftGraphic(wrap(SVG::update));
+                            upgradeItem.visibleProperty().bind(control.currentVersionUpgradable);
+                            upgradeItem.setOnAction(e -> control.updateGame());
+                        })
+                        .addNavigationDrawerItem(testGameItem -> {
+                            testGameItem.setTitle(i18n("version.launch.test"));
+                            testGameItem.setLeftGraphic(wrap(SVG::rocketLaunchOutline));
+                            testGameItem.setOnAction(e -> control.testGame());
+                        })
+                        .addNavigationDrawerItem(browseMenuItem -> {
+                            browseMenuItem.setTitle(i18n("settings.game.exploration"));
+                            browseMenuItem.setLeftGraphic(wrap(SVG::folderOutline));
+                            browseMenuItem.setOnAction(e -> browsePopup.show(browseMenuItem, JFXPopup.PopupVPosition.BOTTOM, JFXPopup.PopupHPosition.LEFT, browseMenuItem.getWidth(), 0));
+                        })
+                        .addNavigationDrawerItem(managementItem -> {
+                            managementItem.setTitle(i18n("settings.game.management"));
+                            managementItem.setLeftGraphic(wrap(SVG::wrenchOutline));
+                            managementItem.setOnAction(e -> managementPopup.show(managementItem, JFXPopup.PopupVPosition.BOTTOM, JFXPopup.PopupHPosition.LEFT, managementItem.getWidth(), 0));
+                        });
                 toolbar.getStyleClass().add("advanced-list-box-clear-padding");
                 FXUtils.setLimitHeight(toolbar, 40 * 4 + 12 * 2);
-                left.setBottom(toolbar);
+
+                setLeft(sideBar, toolbar);
             }
 
             control.state.bind(Bindings.createObjectBinding(() ->
@@ -363,21 +306,22 @@ public class VersionPage extends Control implements DecoratorPage, DownloadPage.
 
             //control.transitionPane.getStyleClass().add("gray-background");
             //FXUtils.setOverflowHidden(control.transitionPane, 8);
-            root.setCenter(control.transitionPane);
-
-            spinnerPane.loadingProperty().bind(control.loading);
-            spinnerPane.setContent(root);
-            getChildren().setAll(spinnerPane);
+            setCenter(control.transitionPane);
         }
     }
 
     public static Node wrap(Node node) {
         StackPane stackPane = new StackPane();
+        stackPane.setAlignment(Pos.CENTER);
         FXUtils.setLimitWidth(stackPane, 30);
         FXUtils.setLimitHeight(stackPane, 20);
-        stackPane.setPadding(new Insets(0, 10, 0, 0));
+        stackPane.setPadding(new Insets(0, 0, 0, 0));
         stackPane.getChildren().setAll(node);
         return stackPane;
+    }
+
+    public static Node wrap(SVG.SVGIcon svg) {
+        return wrap(svg.createIcon(null, 20, 20));
     }
 
     public interface VersionLoadable {

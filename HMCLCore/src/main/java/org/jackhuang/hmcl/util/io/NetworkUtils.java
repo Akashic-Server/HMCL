@@ -66,6 +66,8 @@ public final class NetworkUtils {
     }
 
     public static List<Pair<String, String>> parseQuery(String queryParameterString) {
+        if (queryParameterString == null) return Collections.emptyList();
+
         List<Pair<String, String>> result = new ArrayList<>();
 
         try (Scanner scanner = new Scanner(queryParameterString)) {
@@ -87,8 +89,8 @@ public final class NetworkUtils {
     public static URLConnection createConnection(URL url) throws IOException {
         URLConnection connection = url.openConnection();
         connection.setUseCaches(false);
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(15000);
+        connection.setConnectTimeout(5000);
+        connection.setReadTimeout(5000);
         connection.setRequestProperty("Accept-Language", Locale.getDefault().toString());
         return connection;
     }
@@ -143,8 +145,8 @@ public final class NetworkUtils {
         while (true) {
 
             conn.setUseCaches(false);
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(15000);
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
             conn.setInstanceFollowRedirects(false);
             Map<String, List<String>> properties = conn.getRequestProperties();
             String method = conn.getRequestMethod();

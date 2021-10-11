@@ -25,10 +25,12 @@ import javafx.beans.binding.Bindings;
 import javafx.beans.binding.ObjectBinding;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.Skin;
@@ -37,18 +39,24 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
 import org.jackhuang.hmcl.game.GameVersion;
-import org.jackhuang.hmcl.mod.curse.CurseAddon;
-import org.jackhuang.hmcl.mod.curse.CurseModManager;
+import org.jackhuang.hmcl.game.Version;
+import org.jackhuang.hmcl.mod.RemoteMod;
+import org.jackhuang.hmcl.mod.RemoteModRepository;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
+import org.jackhuang.hmcl.task.TaskExecutor;
 import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
+import org.jackhuang.hmcl.ui.WeakListenerHolder;
 import org.jackhuang.hmcl.ui.construct.FloatListCell;
 import org.jackhuang.hmcl.ui.construct.SpinnerPane;
 import org.jackhuang.hmcl.ui.construct.TwoLineListItem;
 import org.jackhuang.hmcl.ui.decorator.DecoratorPage;
+import org.jackhuang.hmcl.util.AggregatedObservableList;
+import org.jackhuang.hmcl.util.Lang;
 import org.jackhuang.hmcl.util.StringUtils;
+import org.jackhuang.hmcl.util.i18n.I18n;
 import org.jackhuang.hmcl.util.javafx.BindingMapping;
 
 import java.io.File;
@@ -57,7 +65,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.jackhuang.hmcl.ui.FXUtils.stringConverter;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
+import static org.jackhuang.hmcl.util.javafx.ExtendedProperties.selectedItemPropertyFor;
 
 public class DownloadListPage extends Control implements DecoratorPage, VersionPage.VersionLoadable {
     protected final ReadOnlyObjectWrapper<State> state = new ReadOnlyObjectWrapper<>();
@@ -65,29 +75,35 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
     private final BooleanProperty failed = new SimpleBooleanProperty(false);
     private final boolean versionSelection;
     private final ObjectProperty<Profile.ProfileVersion> version = new SimpleObjectProperty<>();
-    private final ListProperty<CurseAddon> items = new SimpleListProperty<>(this, "items", FXCollections.observableArrayList());
+    private final ListProperty<RemoteMod> items = new SimpleListProperty<>(this, "items", FXCollections.observableArrayList());
+    private final ObservableList<String> versions = FXCollections.observableArrayList();
+    private final StringProperty selectedVersion = new SimpleStringProperty();
     private final DownloadPage.DownloadCallback callback;
     private boolean searchInitialized = false;
     protected final BooleanProperty supportChinese = new SimpleBooleanProperty();
+    private final ObservableList<Node> actions = FXCollections.observableArrayList();
+    protected final ListProperty<String> downloadSources = new SimpleListProperty<>(this, "downloadSources", FXCollections.observableArrayList());
+    protected final StringProperty downloadSource = new SimpleStringProperty();
+    private final WeakListenerHolder listenerHolder = new WeakListenerHolder();
+    private TaskExecutor executor;
+    protected RemoteModRepository repository;
 
-    /**
-     * @see org.jackhuang.hmcl.mod.curse.CurseModManager#SECTION_MODPACK
-     * @see org.jackhuang.hmcl.mod.curse.CurseModManager#SECTION_MOD
-     */
-    private final int section;
-
-    public DownloadListPage(int section) {
-        this(section, null);
+    public DownloadListPage(RemoteModRepository repository) {
+        this(repository, null);
     }
 
-    public DownloadListPage(int section, DownloadPage.DownloadCallback callback) {
-        this(section, callback, false);
+    public DownloadListPage(RemoteModRepository repository, DownloadPage.DownloadCallback callback) {
+        this(repository, callback, false);
     }
 
-    public DownloadListPage(int section, DownloadPage.DownloadCallback callback, boolean versionSelection) {
-        this.section = section;
+    public DownloadListPage(RemoteModRepository repository, DownloadPage.DownloadCallback callback, boolean versionSelection) {
+        this.repository = repository;
         this.callback = callback;
         this.versionSelection = versionSelection;
+    }
+
+    public ObservableList<Node> getActions() {
+        return actions;
     }
 
     @Override
@@ -99,7 +115,14 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
 
         if (!searchInitialized) {
             searchInitialized = true;
-            search("", 0, 0, "", 0);
+            search("", null, 0, "", 0);
+        }
+
+        if (versionSelection) {
+            versions.setAll(profile.getRepository().getDisplayVersions()
+                    .map(Version::getId)
+                    .collect(Collectors.toList()));
+            selectedVersion.set(profile.getSelectedVersion());
         }
     }
 
@@ -127,13 +150,17 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
         this.loading.set(loading);
     }
 
-    public void search(String userGameVersion, int category, int pageOffset, String searchFilter, int sort) {
+    public void search(String userGameVersion, RemoteModRepository.Category category, int pageOffset, String searchFilter, int sort) {
         setLoading(true);
         setFailed(false);
         File versionJar = StringUtils.isNotBlank(version.get().getVersion())
                 ? version.get().getProfile().getRepository().getVersionJar(version.get().getVersion())
                 : null;
-        Task.supplyAsync(() -> {
+        if (executor != null && !executor.isCancelled()) {
+            executor.cancel();
+        }
+
+        executor = Task.supplyAsync(() -> {
             String gameVersion;
             if (StringUtils.isBlank(version.get().getVersion())) {
                 gameVersion = userGameVersion;
@@ -142,20 +169,36 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
             }
             return gameVersion;
         }).thenApplyAsync(gameVersion -> {
-            return searchImpl(gameVersion, category, section, pageOffset, searchFilter, sort);
+            return repository.search(gameVersion, category, pageOffset, 50, searchFilter, sort);
         }).whenComplete(Schedulers.javafx(), (result, exception) -> {
             setLoading(false);
             if (exception == null) {
-                items.setAll(result);
+                items.setAll(result.collect(Collectors.toList()));
                 failed.set(false);
             } else {
                 failed.set(true);
             }
-        }).start();
+        }).executor(true);
     }
 
-    protected List<CurseAddon> searchImpl(String gameVersion, int category, int section, int pageOffset, String searchFilter, int sort) throws Exception {
-        return CurseModManager.searchPaginated(gameVersion, category, section, pageOffset, searchFilter, sort);
+    protected String getLocalizedCategory(String category) {
+        return i18n("curse.category." + category);
+    }
+
+    protected String getLocalizedCategoryIndent(ModDownloadListPageSkin.CategoryIndented category) {
+        return StringUtils.repeats(' ', category.indent * 4) + getLocalizedCategory(category.getCategory() == null ? "0" : category.getCategory().getId());
+    }
+
+    protected String getLocalizedOfficialPage() {
+        return i18n("mods.curseforge");
+    }
+
+    protected Profile.ProfileVersion getProfileVersion() {
+        if (versionSelection) {
+            return new Profile.ProfileVersion(version.get().getProfile(), selectedVersion.get());
+        } else {
+            return version.get();
+        }
     }
 
     @Override
@@ -169,6 +212,7 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
     }
 
     private static class ModDownloadListPageSkin extends SkinBase<DownloadListPage> {
+        private final AggregatedObservableList<Node> actions = new AggregatedObservableList<>();
 
         protected ModDownloadListPageSkin(DownloadListPage control) {
             super(control);
@@ -194,18 +238,28 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
             {
                 int rowIndex = 0;
 
-                if (control.versionSelection) {
+                if (control.versionSelection && control.downloadSources.getSize() > 1) {
                     JFXComboBox<String> versionsComboBox = new JFXComboBox<>();
-                    GridPane.setColumnSpan(versionsComboBox, 3);
                     versionsComboBox.setMaxWidth(Double.MAX_VALUE);
+                    Bindings.bindContent(versionsComboBox.getItems(), control.versions);
+                    selectedItemPropertyFor(versionsComboBox).bindBidirectional(control.selectedVersion);
 
-                    searchPane.addRow(rowIndex++, new Label(i18n("version")), versionsComboBox);
+                    JFXComboBox<String> downloadSourceComboBox = new JFXComboBox<>();
+                    downloadSourceComboBox.setMaxWidth(Double.MAX_VALUE);
+                    downloadSourceComboBox.getItems().setAll(control.downloadSources.get());
+                    downloadSourceComboBox.setConverter(stringConverter(I18n::i18n));
+                    selectedItemPropertyFor(downloadSourceComboBox).bindBidirectional(control.downloadSource);
+
+                    searchPane.addRow(rowIndex++, new Label(i18n("version")), versionsComboBox, new Label(i18n("settings.launcher.download_source")), downloadSourceComboBox);
                 }
 
                 JFXTextField nameField = new JFXTextField();
                 nameField.setPromptText(getSkinnable().supportChinese.get() ? i18n("search.hint.chinese") : i18n("search.hint.english"));
 
-                JFXTextField gameVersionField = new JFXTextField();
+                JFXComboBox<String> gameVersionField = new JFXComboBox<>();
+                gameVersionField.setMaxWidth(Double.MAX_VALUE);
+                gameVersionField.setEditable(true);
+                gameVersionField.getItems().setAll(RemoteModRepository.DEFAULT_GAME_VERSIONS);
                 Label lblGameVersion = new Label(i18n("world.game_version"));
                 searchPane.addRow(rowIndex++, new Label(i18n("mods.name")), nameField, lblGameVersion, gameVersionField);
 
@@ -226,17 +280,18 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
 
                 StackPane categoryStackPane = new StackPane();
                 JFXComboBox<CategoryIndented> categoryComboBox = new JFXComboBox<>();
-                categoryComboBox.getItems().setAll(new CategoryIndented(0, 0));
+                categoryComboBox.getItems().setAll(new CategoryIndented(0, null));
                 categoryStackPane.getChildren().setAll(categoryComboBox);
                 categoryComboBox.prefWidthProperty().bind(categoryStackPane.widthProperty());
                 categoryComboBox.getStyleClass().add("fit-width");
                 categoryComboBox.setPromptText(i18n("mods.category"));
                 categoryComboBox.getSelectionModel().select(0);
-                Task.supplyAsync(() -> CurseModManager.getCategories(getSkinnable().section))
+                categoryComboBox.setConverter(stringConverter(getSkinnable()::getLocalizedCategoryIndent));
+                Task.supplyAsync(() -> getSkinnable().repository.getCategories())
                         .thenAcceptAsync(Schedulers.javafx(), categories -> {
                             List<CategoryIndented> result = new ArrayList<>();
-                            result.add(new CategoryIndented(0, 0));
-                            for (CurseModManager.Category category : categories) {
+                            result.add(new CategoryIndented(0, null));
+                            for (RemoteModRepository.Category category : Lang.toIterable(categories)) {
                                 resolveCategory(category, 0, result);
                             }
                             categoryComboBox.getItems().setAll(result);
@@ -261,16 +316,20 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                 searchButton.setText(i18n("search"));
                 searchButton.getStyleClass().add("jfx-button-raised");
                 searchButton.setButtonType(JFXButton.ButtonType.RAISED);
-                HBox searchBox = new HBox(searchButton);
+                ObservableList<Node> last = FXCollections.observableArrayList(searchButton);
+                HBox searchBox = new HBox(8);
+                actions.appendList(control.actions);
+                actions.appendList(last);
+                Bindings.bindContent(searchBox.getChildren(), actions.getAggregatedList());
                 GridPane.setColumnSpan(searchBox, 4);
                 searchBox.setAlignment(Pos.CENTER_RIGHT);
                 searchPane.addRow(rowIndex++, searchBox);
 
                 EventHandler<ActionEvent> searchAction = e -> getSkinnable()
-                        .search(gameVersionField.getText(),
+                        .search(gameVersionField.getSelectionModel().getSelectedItem(),
                                 Optional.ofNullable(categoryComboBox.getSelectionModel().getSelectedItem())
-                                        .map(CategoryIndented::getCategoryId)
-                                        .orElse(0),
+                                        .map(CategoryIndented::getCategory)
+                                        .orElse(null),
                                 0,
                                 nameField.getText(),
                                 sortComboBox.getSelectionModel().getSelectedIndex());
@@ -293,16 +352,16 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                     }
                 }, getSkinnable().failedProperty()));
 
-                JFXListView<CurseAddon> listView = new JFXListView<>();
+                JFXListView<RemoteMod> listView = new JFXListView<>();
                 spinnerPane.setContent(listView);
                 Bindings.bindContent(listView.getItems(), getSkinnable().items);
                 listView.setOnMouseClicked(e -> {
                     if (listView.getSelectionModel().getSelectedIndex() < 0)
                         return;
-                    CurseAddon selectedItem = listView.getSelectionModel().getSelectedItem();
-                    Controllers.navigate(new DownloadPage(selectedItem, getSkinnable().version.get(), getSkinnable().callback));
+                    RemoteMod selectedItem = listView.getSelectionModel().getSelectedItem();
+                    Controllers.navigate(new DownloadPage(getSkinnable(), selectedItem, getSkinnable().getProfileVersion(), getSkinnable().callback));
                 });
-                listView.setCellFactory(x -> new FloatListCell<CurseAddon>(listView) {
+                listView.setCellFactory(x -> new FloatListCell<RemoteMod>(listView) {
                     TwoLineListItem content = new TwoLineListItem();
                     ImageView imageView = new ImageView();
 
@@ -315,19 +374,17 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                     }
 
                     @Override
-                    protected void updateControl(CurseAddon dataItem, boolean empty) {
+                    protected void updateControl(RemoteMod dataItem, boolean empty) {
                         if (empty) return;
                         ModTranslations.Mod mod = ModTranslations.getModByCurseForgeId(dataItem.getSlug());
-                        content.setTitle(mod != null ? mod.getDisplayName() : dataItem.getName());
-                        content.setSubtitle(dataItem.getSummary());
+                        content.setTitle(mod != null ? mod.getDisplayName() : dataItem.getTitle());
+                        content.setSubtitle(dataItem.getDescription());
                         content.getTags().setAll(dataItem.getCategories().stream()
-                                .map(category -> i18n("curse.category." + category.getCategoryId()))
+                                .map(category -> getSkinnable().getLocalizedCategory(category))
                                 .collect(Collectors.toList()));
 
-                        for (CurseAddon.Attachment attachment : dataItem.getAttachments()) {
-                            if (attachment.isDefault()) {
-                                imageView.setImage(new Image(attachment.getThumbnailUrl(), 40, 40, true, true, true));
-                            }
+                        if (StringUtils.isNotBlank(dataItem.getIconUrl())) {
+                            imageView.setImage(new Image(dataItem.getIconUrl(), 40, 40, true, true, true));
                         }
                     }
                 });
@@ -338,30 +395,25 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
 
         private static class CategoryIndented {
             private final int indent;
-            private final int categoryId;
+            private final RemoteModRepository.Category category;
 
-            public CategoryIndented(int indent, int categoryId) {
+            public CategoryIndented(int indent, RemoteModRepository.Category category) {
                 this.indent = indent;
-                this.categoryId = categoryId;
+                this.category = category;
             }
 
             public int getIndent() {
                 return indent;
             }
 
-            public int getCategoryId() {
-                return categoryId;
-            }
-
-            @Override
-            public String toString() {
-                return StringUtils.repeats(' ', indent) + i18n("curse.category." + categoryId);
+            public RemoteModRepository.Category getCategory() {
+                return category;
             }
         }
 
-        private static void resolveCategory(CurseModManager.Category category, int indent, List<CategoryIndented> result) {
-            result.add(new CategoryIndented(indent, category.getId()));
-            for (CurseModManager.Category subcategory : category.getSubcategories()) {
+        private static void resolveCategory(RemoteModRepository.Category category, int indent, List<CategoryIndented> result) {
+            result.add(new CategoryIndented(indent, category));
+            for (RemoteModRepository.Category subcategory : category.getSubcategories()) {
                 resolveCategory(subcategory, indent + 1, result);
             }
         }

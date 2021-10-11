@@ -1,12 +1,37 @@
+/*
+ * Hello Minecraft! Launcher
+ * Copyright (C) 2021  huangyuhui <huanghongxun2008@126.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package org.jackhuang.hmcl.mod.curse;
 
+import org.jackhuang.hmcl.mod.ModLoaderType;
+import org.jackhuang.hmcl.mod.RemoteMod;
 import org.jackhuang.hmcl.util.Immutable;
 
+import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Immutable
-public class CurseAddon {
+public class CurseAddon implements RemoteMod.IMod {
     private final int id;
     private final String name;
     private final List<Author> authors;
@@ -15,6 +40,7 @@ public class CurseAddon {
     private final int gameId;
     private final String summary;
     private final int defaultFileId;
+    private final LatestFile file;
     private final List<LatestFile> latestFiles;
     private final List<Category> categories;
     private final int status;
@@ -29,7 +55,7 @@ public class CurseAddon {
     private final boolean isAvailable;
     private final boolean isExperimental;
 
-    public CurseAddon(int id, String name, List<Author> authors, List<Attachment> attachments, String websiteUrl, int gameId, String summary, int defaultFileId, List<LatestFile> latestFiles, List<Category> categories, int status, int primaryCategoryId, String slug, List<GameVersionLatestFile> gameVersionLatestFiles, boolean isFeatured, double popularityScore, int gamePopularityRank, String primaryLanguage, List<String> modLoaders, boolean isAvailable, boolean isExperimental) {
+    public CurseAddon(int id, String name, List<Author> authors, List<Attachment> attachments, String websiteUrl, int gameId, String summary, int defaultFileId, LatestFile file, List<LatestFile> latestFiles, List<Category> categories, int status, int primaryCategoryId, String slug, List<GameVersionLatestFile> gameVersionLatestFiles, boolean isFeatured, double popularityScore, int gamePopularityRank, String primaryLanguage, List<String> modLoaders, boolean isAvailable, boolean isExperimental) {
         this.id = id;
         this.name = name;
         this.authors = authors;
@@ -38,6 +64,7 @@ public class CurseAddon {
         this.gameId = gameId;
         this.summary = summary;
         this.defaultFileId = defaultFileId;
+        this.file = file;
         this.latestFiles = latestFiles;
         this.categories = categories;
         this.status = status;
@@ -83,6 +110,10 @@ public class CurseAddon {
 
     public int getDefaultFileId() {
         return defaultFileId;
+    }
+
+    public LatestFile getFile() {
+        return file;
     }
 
     public List<LatestFile> getLatestFiles() {
@@ -135,6 +166,45 @@ public class CurseAddon {
 
     public boolean isExperimental() {
         return isExperimental;
+    }
+
+    @Override
+    public List<RemoteMod> loadDependencies() throws IOException {
+        Set<Integer> dependencies = latestFiles.stream()
+                .flatMap(latestFile -> latestFile.getDependencies().stream())
+                .filter(dep -> dep.getType() == 3)
+                .map(Dependency::getAddonId)
+                .collect(Collectors.toSet());
+        List<RemoteMod> mods = new ArrayList<>();
+        for (int dependencyId : dependencies) {
+            mods.add(CurseForgeRemoteModRepository.MODS.getModById(Integer.toString(dependencyId)));
+        }
+        return mods;
+    }
+
+    @Override
+    public Stream<RemoteMod.Version> loadVersions() throws IOException {
+        return CurseForgeRemoteModRepository.MODS.getRemoteVersionsById(Integer.toString(id));
+    }
+
+    public RemoteMod toMod() {
+        String iconUrl = null;
+        for (CurseAddon.Attachment attachment : attachments) {
+            if (attachment.isDefault()) {
+                iconUrl = attachment.getThumbnailUrl();
+            }
+        }
+
+        return new RemoteMod(
+                slug,
+                "",
+                name,
+                summary,
+                categories.stream().map(category -> Integer.toString(category.getCategoryId())).collect(Collectors.toList()),
+                websiteUrl,
+                iconUrl,
+                this
+        );
     }
 
     @Immutable
@@ -271,7 +341,7 @@ public class CurseAddon {
     }
 
     @Immutable
-    public static class LatestFile {
+    public static class LatestFile implements RemoteMod.IVersion {
         private final int id;
         private final String displayName;
         private final String fileName;
@@ -409,6 +479,52 @@ public class CurseAddon {
                 fileDataInstant = Instant.parse(fileDate);
             }
             return fileDataInstant;
+        }
+
+        @Override
+        public RemoteMod.Type getType() {
+            return RemoteMod.Type.CURSEFORGE;
+        }
+
+        public RemoteMod.Version toVersion() {
+            RemoteMod.VersionType versionType;
+            switch (getReleaseType()) {
+                case 1:
+                    versionType = RemoteMod.VersionType.Release;
+                    break;
+                case 2:
+                    versionType = RemoteMod.VersionType.Beta;
+                    break;
+                case 3:
+                    versionType = RemoteMod.VersionType.Alpha;
+                    break;
+                default:
+                    versionType = RemoteMod.VersionType.Release;
+                    break;
+            }
+
+            ModLoaderType modLoaderType;
+            if (gameVersion.contains("Forge")) {
+                modLoaderType = ModLoaderType.FORGE;
+            } else if (gameVersion.contains("Fabric")) {
+                modLoaderType = ModLoaderType.FABRIC;
+            } else {
+                modLoaderType = ModLoaderType.UNKNOWN;
+            }
+
+            return new RemoteMod.Version(
+                    this,
+                    Integer.toString(projectId),
+                    getDisplayName(),
+                    getFileName(),
+                    null,
+                    getParsedFileDate(),
+                    versionType,
+                    new RemoteMod.File(Collections.emptyMap(), getDownloadUrl(), getFileName()),
+                    Collections.emptyList(),
+                    gameVersion.stream().filter(ver -> ver.startsWith("1.") || ver.contains("w")).collect(Collectors.toList()),
+                    Collections.singletonList(modLoaderType)
+            );
         }
     }
 

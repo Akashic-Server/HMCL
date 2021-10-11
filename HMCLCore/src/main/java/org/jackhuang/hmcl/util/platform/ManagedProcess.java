@@ -101,9 +101,9 @@ public class ManagedProcess {
     public boolean isRunning() {
         try {
             process.exitValue();
-            return true;
-        } catch (IllegalThreadStateException e) {
             return false;
+        } catch (IllegalThreadStateException e) {
+            return true;
         }
     }
 
@@ -119,6 +119,10 @@ public class ManagedProcess {
      */
     public void stop() {
         process.destroy();
+        destroyRelatedThreads();
+    }
+
+    public void destroyRelatedThreads() {
         relatedThreads.forEach(Thread::interrupt);
     }
 

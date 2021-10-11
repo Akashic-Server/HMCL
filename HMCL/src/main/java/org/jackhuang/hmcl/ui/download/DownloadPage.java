@@ -17,18 +17,17 @@
  */
 package org.jackhuang.hmcl.ui.download;
 
+import com.jfoenix.controls.JFXButton;
 import javafx.beans.property.ReadOnlyObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.scene.Node;
-import javafx.scene.layout.BorderPane;
 import org.jackhuang.hmcl.download.*;
 import org.jackhuang.hmcl.download.game.GameRemoteVersion;
-import org.jackhuang.hmcl.mod.curse.CurseAddon;
-import org.jackhuang.hmcl.mod.curse.CurseModManager;
+import org.jackhuang.hmcl.mod.RemoteMod;
+import org.jackhuang.hmcl.mod.curse.CurseForgeRemoteModRepository;
 import org.jackhuang.hmcl.setting.DownloadProviders;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.setting.Profiles;
-import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.task.FileDownloadTask;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.Task;
@@ -40,8 +39,10 @@ import org.jackhuang.hmcl.ui.WeakListenerHolder;
 import org.jackhuang.hmcl.ui.animation.ContainerAnimations;
 import org.jackhuang.hmcl.ui.animation.TransitionPane;
 import org.jackhuang.hmcl.ui.construct.AdvancedListBox;
+import org.jackhuang.hmcl.ui.construct.MessageDialogPane;
 import org.jackhuang.hmcl.ui.construct.TabHeader;
 import org.jackhuang.hmcl.ui.construct.TaskExecutorDialogPane;
+import org.jackhuang.hmcl.ui.decorator.DecoratorAnimatedPage;
 import org.jackhuang.hmcl.ui.decorator.DecoratorPage;
 import org.jackhuang.hmcl.ui.versions.DownloadListPage;
 import org.jackhuang.hmcl.ui.versions.ModDownloadListPage;
@@ -56,12 +57,14 @@ import org.jetbrains.annotations.Nullable;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.function.Supplier;
 
 import static org.jackhuang.hmcl.ui.FXUtils.runInFX;
 import static org.jackhuang.hmcl.ui.versions.VersionPage.wrap;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
-public class DownloadPage extends BorderPane implements DecoratorPage {
+public class DownloadPage extends DecoratorAnimatedPage implements DecoratorPage {
     private final ReadOnlyObjectWrapper<DecoratorPage.State> state = new ReadOnlyObjectWrapper<>(DecoratorPage.State.fromTitle(i18n("download"), -1));
     private final TabHeader tab;
     private final TabHeader.Tab<VersionsPage> newGameTab = new TabHeader.Tab<>("newGameTab");
@@ -76,24 +79,29 @@ public class DownloadPage extends BorderPane implements DecoratorPage {
     private WeakListenerHolder listenerHolder;
 
     public DownloadPage() {
-        newGameTab.setNodeSupplier(() -> new VersionsPage(versionPageNavigator, i18n("install.installer.choose", i18n("install.installer.game")), "", DownloadProviders.getDownloadProvider(),
-                "game", versionPageNavigator::onGameSelected));
-        modpackTab.setNodeSupplier(() -> new DownloadListPage(CurseModManager.SECTION_MODPACK, Versions::downloadModpackImpl));
-        modTab.setNodeSupplier(() -> new ModDownloadListPage(CurseModManager.SECTION_MOD, (profile, version, file) -> download(profile, version, file, "mods"), true));
-        resourcePackTab.setNodeSupplier(() -> new DownloadListPage(CurseModManager.SECTION_RESOURCE_PACK, (profile, version, file) -> download(profile, version, file, "resourcepacks")));
-//        customizationTab.setNodeSupplier(() -> new ModDownloadListPage(CurseModManager.SECTION_CUSTOMIZATION, this::download));
-        worldTab.setNodeSupplier(() -> new DownloadListPage(CurseModManager.SECTION_WORLD));
+        newGameTab.setNodeSupplier(loadVersionFor(() -> new VersionsPage(versionPageNavigator, i18n("install.installer.choose", i18n("install.installer.game")), "", DownloadProviders.getDownloadProvider(),
+                "game", versionPageNavigator::onGameSelected)));
+        modpackTab.setNodeSupplier(loadVersionFor(() -> {
+            DownloadListPage page = new DownloadListPage(CurseForgeRemoteModRepository.MODPACKS, Versions::downloadModpackImpl);
+
+            JFXButton installLocalModpackButton = new JFXButton(i18n("install.modpack"));
+            installLocalModpackButton.setButtonType(JFXButton.ButtonType.RAISED);
+            installLocalModpackButton.getStyleClass().add("jfx-button-raised");
+            installLocalModpackButton.setOnAction(e -> Versions.importModpack());
+
+            page.getActions().add(installLocalModpackButton);
+            return page;
+        }));
+        modTab.setNodeSupplier(loadVersionFor(() -> new ModDownloadListPage((profile, version, file) -> download(profile, version, file, "mods"), true)));
+        resourcePackTab.setNodeSupplier(loadVersionFor(() -> new DownloadListPage(CurseForgeRemoteModRepository.RESOURCE_PACKS, (profile, version, file) -> download(profile, version, file, "resourcepacks"))));
+//        customizationTab.setNodeSupplier(() -> new ModDownloadListPage(CurseModManager.CUSTOMIZATIONS, this::download));
+        worldTab.setNodeSupplier(loadVersionFor(() -> new DownloadListPage(CurseForgeRemoteModRepository.WORLDS)));
         tab = new TabHeader(newGameTab, modpackTab, modTab, resourcePackTab, worldTab);
 
         Profiles.registerVersionsListener(this::loadVersions);
 
-        tab.getSelectionModel().select(newGameTab);
+        tab.select(newGameTab);
         FXUtils.onChangeAndOperate(tab.getSelectionModel().selectedItemProperty(), newValue -> {
-            if (newValue.initializeIfNeeded()) {
-                if (newValue.getNode() instanceof VersionPage.VersionLoadable) {
-                    ((VersionPage.VersionLoadable) newValue.getNode()).loadVersion(Profiles.getSelectedProfile(), null);
-                }
-            }
             transitionPane.setContent(newValue.getNode(), ContainerAnimations.FADE.getAnimationProducer());
         });
 
@@ -101,40 +109,39 @@ public class DownloadPage extends BorderPane implements DecoratorPage {
             AdvancedListBox sideBar = new AdvancedListBox()
                     .addNavigationDrawerItem(item -> {
                         item.setTitle(i18n("game"));
-                        item.setLeftGraphic(wrap(SVG.gamepad(Theme.blackFillBinding(), 24, 24)));
+                        item.setLeftGraphic(wrap(SVG::gamepad));
                         item.activeProperty().bind(tab.getSelectionModel().selectedItemProperty().isEqualTo(newGameTab));
-                        item.setOnAction(e -> tab.getSelectionModel().select(newGameTab));
+                        item.setOnAction(e -> tab.select(newGameTab));
                     })
-                    .startCategory(i18n("download"))
                     .addNavigationDrawerItem(item -> {
                         item.setTitle(i18n("mods"));
-                        item.setLeftGraphic(wrap(SVG.puzzle(Theme.blackFillBinding(), 24, 24)));
+                        item.setLeftGraphic(wrap(SVG::puzzle));
                         item.activeProperty().bind(tab.getSelectionModel().selectedItemProperty().isEqualTo(modTab));
-                        item.setOnAction(e -> tab.getSelectionModel().select(modTab));
+                        item.setOnAction(e -> tab.select(modTab));
                     })
                     .addNavigationDrawerItem(settingsItem -> {
                         settingsItem.setTitle(i18n("modpack"));
-                        settingsItem.setLeftGraphic(wrap(SVG.pack(Theme.blackFillBinding(), 24, 24)));
+                        settingsItem.setLeftGraphic(wrap(SVG::pack));
                         settingsItem.activeProperty().bind(tab.getSelectionModel().selectedItemProperty().isEqualTo(modpackTab));
-                        settingsItem.setOnAction(e -> tab.getSelectionModel().select(modpackTab));
+                        settingsItem.setOnAction(e -> tab.select(modpackTab));
                     })
                     .addNavigationDrawerItem(item -> {
                         item.setTitle(i18n("resourcepack"));
-                        item.setLeftGraphic(wrap(SVG.textureBox(Theme.blackFillBinding(), 24, 24)));
+                        item.setLeftGraphic(wrap(SVG::textureBox));
                         item.activeProperty().bind(tab.getSelectionModel().selectedItemProperty().isEqualTo(resourcePackTab));
-                        item.setOnAction(e -> tab.getSelectionModel().select(resourcePackTab));
+                        item.setOnAction(e -> tab.select(resourcePackTab));
                     })
 //                    .addNavigationDrawerItem(item -> {
 //                        item.setTitle(i18n("download.curseforge.customization"));
-//                        item.setLeftGraphic(wrap(SVG.script(Theme.blackFillBinding(), 24, 24)));
+//                        item.setLeftGraphic(wrap(SVG::script));
 //                        item.activeProperty().bind(tab.getSelectionModel().selectedItemProperty().isEqualTo(customizationTab));
-//                        item.setOnAction(e -> tab.getSelectionModel().select(customizationTab));
+//                        item.setOnAction(e -> tab.select(customizationTab));
 //                    })
                     .addNavigationDrawerItem(item -> {
                         item.setTitle(i18n("world"));
-                        item.setLeftGraphic(wrap(SVG.earth(Theme.blackFillBinding(), 24, 24)));
+                        item.setLeftGraphic(wrap(SVG::earth));
                         item.activeProperty().bind(tab.getSelectionModel().selectedItemProperty().isEqualTo(worldTab));
-                        item.setOnAction(e -> tab.getSelectionModel().select(worldTab));
+                        item.setOnAction(e -> tab.select(worldTab));
                     });
             FXUtils.setLimitWidth(sideBar, 200);
             setLeft(sideBar);
@@ -143,19 +150,39 @@ public class DownloadPage extends BorderPane implements DecoratorPage {
         setCenter(transitionPane);
     }
 
-    private void download(Profile profile, @Nullable String version, CurseAddon.LatestFile file, String subdirectoryName) {
+    private <T extends Node> Supplier<T> loadVersionFor(Supplier<T> nodeSupplier) {
+        return () -> {
+            T node = nodeSupplier.get();
+            if (node instanceof VersionPage.VersionLoadable) {
+                ((VersionPage.VersionLoadable) node).loadVersion(Profiles.getSelectedProfile(), null);
+            }
+            return node;
+        };
+    }
+
+    private void download(Profile profile, @Nullable String version, RemoteMod.Version file, String subdirectoryName) {
         if (version == null) version = profile.getSelectedVersion();
 
         Path runDirectory = profile.getRepository().hasVersion(version) ? profile.getRepository().getRunDirectory(version).toPath() : profile.getRepository().getBaseDirectory().toPath();
-        Path dest = runDirectory.resolve(subdirectoryName).resolve(file.getFileName());
+        Path dest = runDirectory.resolve(subdirectoryName).resolve(file.getFile().getFilename());
 
         TaskExecutorDialogPane downloadingPane = new TaskExecutorDialogPane(it -> {
         });
 
         TaskExecutor executor = Task.composeAsync(() -> {
-            FileDownloadTask task = new FileDownloadTask(NetworkUtils.toURL(file.getDownloadUrl()), dest.toFile());
-            task.setName(file.getDisplayName());
+            FileDownloadTask task = new FileDownloadTask(NetworkUtils.toURL(file.getFile().getUrl()), dest.toFile());
+            task.setName(file.getName());
             return task;
+        }).whenComplete(Schedulers.javafx(), exception -> {
+            if (exception != null) {
+                if (exception instanceof CancellationException) {
+                    Controllers.showToast(i18n("message.cancelled"));
+                } else {
+                    Controllers.dialog(DownloadProviders.localizeErrorMessage(exception), i18n("install.failed.downloading"), MessageDialogPane.MessageType.ERROR);
+                }
+            } else {
+                Controllers.showToast(i18n("install.success"));
+            }
         }).executor(false);
 
         downloadingPane.setExecutor(executor, true);
@@ -189,6 +216,14 @@ public class DownloadPage extends BorderPane implements DecoratorPage {
     @Override
     public ReadOnlyObjectProperty<State> stateProperty() {
         return state.getReadOnlyProperty();
+    }
+
+    public void showGameDownloads() {
+        tab.select(newGameTab);
+    }
+
+    public void showModDownloads() {
+        tab.select(modTab);
     }
 
     private class DownloadNavigator implements Navigation {
