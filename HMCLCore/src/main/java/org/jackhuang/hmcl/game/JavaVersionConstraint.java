@@ -17,18 +17,19 @@
  */
 package org.jackhuang.hmcl.game;
 
-import org.jackhuang.hmcl.util.Pair;
-import org.jackhuang.hmcl.util.Range;
+import org.apache.commons.lang3.Range;
+import org.jackhuang.hmcl.download.LibraryAnalyzer;
+import org.jackhuang.hmcl.util.Lang;
 import org.jackhuang.hmcl.util.platform.Architecture;
 import org.jackhuang.hmcl.util.platform.JavaVersion;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 import org.jackhuang.hmcl.util.versioning.VersionNumber;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
 import java.util.Objects;
 
 import static org.jackhuang.hmcl.download.LibraryAnalyzer.LAUNCH_WRAPPER_MAIN;
-import static org.jackhuang.hmcl.util.Pair.pair;
 
 public enum JavaVersionConstraint {
 
@@ -38,18 +39,21 @@ public enum JavaVersionConstraint {
     VANILLA_JAVA_8(JavaVersionConstraint.RULE_MANDATORY, versionRange("1.13", JavaVersionConstraint.MAX), versionRange("1.8", JavaVersionConstraint.MAX)),
     // Minecraft>=1.7.10+Forge accepts Java 8
     MODDED_JAVA_8(JavaVersionConstraint.RULE_SUGGESTED, versionRange("1.7.10", JavaVersionConstraint.MAX), versionRange("1.8", JavaVersionConstraint.MAX)),
-    // Minecraft<=1.7.2+Forge requires Java<=7
+    // Minecraft<=1.7.2+Forge requires Java<=7, But LegacyModFixer may fix that problem. So only suggest user using Java 7.
     MODDED_JAVA_7(JavaVersionConstraint.RULE_SUGGESTED, versionRange(JavaVersionConstraint.MIN, "1.7.2"), versionRange(JavaVersionConstraint.MIN, "1.7.999")) {
         @Override
-        public boolean appliesToVersion(@Nullable VersionNumber gameVersion, @Nullable Version version) {
+        protected boolean appliesToVersionImpl(VersionNumber gameVersionNumber, @Nullable Version version,
+                                               @Nullable JavaVersion javaVersion) {
             if (version == null) return false;
-            return LAUNCH_WRAPPER_MAIN.equals(version.getMainClass());
+            LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(version);
+            return analyzer.has(LibraryAnalyzer.LibraryType.FORGE);
         }
     },
-    // LaunchWrapper<=1.12 will crash because of assuming the system class loader is an instance of URLClassLoader (Java 8)
+    // LaunchWrapper<=1.12 will crash because LaunchWrapper assumes the system class loader is an instance of URLClassLoader (Java 8)
     LAUNCH_WRAPPER(JavaVersionConstraint.RULE_MANDATORY, versionRange("0", "1.12.999"), versionRange("0", "1.8.999")) {
         @Override
-        public boolean appliesToVersion(VersionNumber gameVersion, Version version) {
+        protected boolean appliesToVersionImpl(VersionNumber gameVersionNumber, @Nullable Version version,
+                                               @Nullable JavaVersion javaVersion) {
             if (version == null) return false;
             return LAUNCH_WRAPPER_MAIN.equals(version.getMainClass()) &&
                     version.getLibraries().stream()
@@ -62,14 +66,15 @@ public enum JavaVersionConstraint {
     // Minecraft with suggested java version recorded in game json is restrictedly constrained.
     GAME_JSON(JavaVersionConstraint.RULE_MANDATORY, versionRange(JavaVersionConstraint.MIN, JavaVersionConstraint.MAX), versionRange(JavaVersionConstraint.MIN, JavaVersionConstraint.MAX)) {
         @Override
-        public boolean appliesToVersion(VersionNumber gameVersion, Version version) {
-            if (gameVersion == null || version == null) return false;
+        protected boolean appliesToVersionImpl(VersionNumber gameVersionNumber, @Nullable Version version,
+                                               @Nullable JavaVersion javaVersion) {
+            if (version == null) return false;
             // We only checks for 1.7.10 and above, since 1.7.2 with Forge can only run on Java 7, but it is recorded Java 8 in game json, which is not correct.
-            return gameVersion.compareTo(VersionNumber.asVersion("1.7.10")) >= 0 && version.getJavaVersion() != null;
+            return gameVersionNumber.compareTo(VersionNumber.asVersion("1.7.10")) >= 0 && version.getJavaVersion() != null;
         }
 
         @Override
-        public Range<VersionNumber> getJavaVersion(Version version) {
+        public Range<VersionNumber> getJavaVersionRange(Version version) {
             String javaVersion;
             if (Objects.requireNonNull(version.getJavaVersion()).getMajorVersion() >= 9) {
                 javaVersion = "" + version.getJavaVersion().getMajorVersion();
@@ -83,44 +88,78 @@ public enum JavaVersionConstraint {
     // For example, JDK 9+ 64-bit cannot load 32-bit lwjgl native library.
     VANILLA_LINUX_JAVA_8(JavaVersionConstraint.RULE_MANDATORY, versionRange("0", "1.12.999"), versionRange(JavaVersionConstraint.MIN, "1.8.999")) {
         @Override
-        public boolean appliesToVersion(@Nullable VersionNumber gameVersion, @Nullable Version version) {
-            return OperatingSystem.CURRENT_OS == OperatingSystem.LINUX && Architecture.CURRENT == Architecture.X86_64;
+        protected boolean appliesToVersionImpl(VersionNumber gameVersionNumber, @Nullable Version version,
+                                               @Nullable JavaVersion javaVersion) {
+            return OperatingSystem.CURRENT_OS == OperatingSystem.LINUX
+                    && Architecture.SYSTEM_ARCH == Architecture.X86_64
+                    && (javaVersion == null || javaVersion.getArchitecture() == Architecture.X86_64);
         }
-    }
-    ;
+
+        @Override
+        public boolean checkJava(VersionNumber gameVersionNumber, Version version, JavaVersion javaVersion) {
+            return javaVersion.getArchitecture() != Architecture.X86_64 || super.checkJava(gameVersionNumber, version, javaVersion);
+        }
+    },
+    // Minecraft currently does not provide official support for architectures other than x86 and x86-64.
+    VANILLA_X86(JavaVersionConstraint.RULE_MANDATORY, versionRange(JavaVersionConstraint.MIN, JavaVersionConstraint.MAX), versionRange(JavaVersionConstraint.MIN, JavaVersionConstraint.MAX)) {
+        @Override
+        protected boolean appliesToVersionImpl(VersionNumber gameVersionNumber, @Nullable Version version,
+                                               @Nullable JavaVersion javaVersion) {
+            return javaVersion != null && !javaVersion.getArchitecture().isX86();
+        }
+
+        @Override
+        public boolean checkJava(VersionNumber gameVersionNumber, Version version, JavaVersion javaVersion) {
+            return javaVersion.getArchitecture().isX86();
+        }
+    };
 
     private final int type;
-    private final Range<VersionNumber> gameVersion;
-    private final Range<VersionNumber> javaVersion;
+    private final Range<VersionNumber> gameVersionRange;
+    private final Range<VersionNumber> javaVersionRange;
 
-    JavaVersionConstraint(int type, Range<VersionNumber> gameVersion, Range<VersionNumber> javaVersion) {
+    JavaVersionConstraint(int type, Range<VersionNumber> gameVersionRange, Range<VersionNumber> javaVersionRange) {
         this.type = type;
-        this.gameVersion = gameVersion;
-        this.javaVersion = javaVersion;
+        this.gameVersionRange = gameVersionRange;
+        this.javaVersionRange = javaVersionRange;
     }
 
     public int getType() {
         return type;
     }
 
-    public Range<VersionNumber> getGameVersion() {
-        return gameVersion;
+    public Range<VersionNumber> getGameVersionRange() {
+        return gameVersionRange;
     }
 
-    public Range<VersionNumber> getJavaVersion(Version version) {
-        return javaVersion;
+    public Range<VersionNumber> getJavaVersionRange(Version version) {
+        return javaVersionRange;
     }
 
-    public boolean appliesToVersion(@Nullable VersionNumber gameVersion, @Nullable Version version) {
+    public final boolean appliesToVersion(@Nullable VersionNumber gameVersionNumber, @Nullable Version version,
+                                          @Nullable JavaVersion javaVersion) {
+        return gameVersionRange.contains(gameVersionNumber)
+                && appliesToVersionImpl(gameVersionNumber, version, javaVersion);
+    }
+
+    protected boolean appliesToVersionImpl(VersionNumber gameVersionNumber, @Nullable Version version,
+                                           @Nullable JavaVersion javaVersion) {
         return true;
     }
 
-    public static Pair<Range<VersionNumber>, Range<VersionNumber>> findSuitableJavaVersionRange(VersionNumber gameVersion, Version version) {
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
+    public boolean checkJava(VersionNumber gameVersionNumber, Version version, JavaVersion javaVersion) {
+        return getJavaVersionRange(version).contains(javaVersion.getVersionNumber());
+    }
+
+    public static final List<JavaVersionConstraint> ALL = Lang.immutableListOf(values());
+
+    public static VersionRanges findSuitableJavaVersionRange(VersionNumber gameVersion, Version version) {
         Range<VersionNumber> mandatoryJavaRange = versionRange(MIN, MAX);
         Range<VersionNumber> suggestedJavaRange = versionRange(MIN, MAX);
-        for (JavaVersionConstraint java : values()) {
-            if (java.gameVersion.contains(gameVersion) && java.appliesToVersion(gameVersion, version)) {
-                Range<VersionNumber> javaVersionRange = java.getJavaVersion(version);
+        for (JavaVersionConstraint java : ALL) {
+            if (java.appliesToVersion(gameVersion, version, null)) {
+                Range<VersionNumber> javaVersionRange = java.getJavaVersionRange(version);
                 if (java.type == RULE_MANDATORY) {
                     mandatoryJavaRange = mandatoryJavaRange.intersectionWith(javaVersionRange);
                     suggestedJavaRange = suggestedJavaRange.intersectionWith(javaVersionRange);
@@ -129,28 +168,30 @@ public enum JavaVersionConstraint {
                 }
             }
         }
-        return pair(mandatoryJavaRange, suggestedJavaRange);
+        return new VersionRanges(mandatoryJavaRange, suggestedJavaRange);
     }
 
     @Nullable
     public static JavaVersion findSuitableJavaVersion(VersionNumber gameVersion, Version version) throws InterruptedException {
-        Pair<Range<VersionNumber>, Range<VersionNumber>> range = findSuitableJavaVersionRange(gameVersion, version);
-        Range<VersionNumber> mandatoryJavaRange = range.getKey();
-        Range<VersionNumber> suggestedJavaRange = range.getValue();
+        VersionRanges range = findSuitableJavaVersionRange(gameVersion, version);
 
         JavaVersion mandatory = null;
         JavaVersion suggested = null;
         for (JavaVersion javaVersion : JavaVersion.getJavas()) {
-            // select the latest java version that this version accepts.
-            if (mandatoryJavaRange.contains(javaVersion.getVersionNumber())) {
+            // select the latest x86 java that this version accepts.
+            if (!javaVersion.getArchitecture().isX86())
+                continue;
+
+            VersionNumber javaVersionNumber = javaVersion.getVersionNumber();
+            if (range.getMandatory().contains(javaVersionNumber)) {
                 if (mandatory == null) mandatory = javaVersion;
-                else if (javaVersion.getVersionNumber().compareTo(mandatory.getVersionNumber()) > 0) {
+                else if (compareJavaVersion(javaVersion, mandatory) > 0) {
                     mandatory = javaVersion;
                 }
             }
-            if (suggestedJavaRange.contains(javaVersion.getVersionNumber())) {
+            if (range.getSuggested().contains(javaVersionNumber)) {
                 if (suggested == null) suggested = javaVersion;
-                else if (javaVersion.getVersionNumber().compareTo(suggested.getVersionNumber()) > 0) {
+                else if (compareJavaVersion(javaVersion, suggested) > 0) {
                     suggested = javaVersion;
                 }
             }
@@ -158,6 +199,21 @@ public enum JavaVersionConstraint {
 
         if (suggested != null) return suggested;
         else return mandatory;
+    }
+
+    private static int compareJavaVersion(JavaVersion javaVersion1, JavaVersion javaVersion2) {
+        Architecture arch1 = javaVersion1.getArchitecture();
+        Architecture arch2 = javaVersion2.getArchitecture();
+
+        if (arch1 != arch2) {
+            if (arch1 == Architecture.X86_64) {
+                return 1;
+            }
+            if (arch2 == Architecture.X86_64) {
+                return -1;
+            }
+        }
+        return javaVersion1.getVersionNumber().compareTo(javaVersion2.getVersionNumber());
     }
 
     public static final int RULE_MANDATORY = 1;
@@ -168,5 +224,23 @@ public enum JavaVersionConstraint {
 
     private static Range<VersionNumber> versionRange(String fromInclusive, String toExclusive) {
         return Range.between(VersionNumber.asVersion(fromInclusive), VersionNumber.asVersion(toExclusive));
+    }
+
+    public static class VersionRanges {
+        private final Range<VersionNumber> mandatory;
+        private final Range<VersionNumber> suggested;
+
+        public VersionRanges(Range<VersionNumber> mandatory, Range<VersionNumber> suggested) {
+            this.mandatory = mandatory;
+            this.suggested = suggested;
+        }
+
+        public Range<VersionNumber> getMandatory() {
+            return mandatory;
+        }
+
+        public Range<VersionNumber> getSuggested() {
+            return suggested;
+        }
     }
 }

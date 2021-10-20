@@ -17,8 +17,7 @@
  */
 package org.jackhuang.hmcl.game;
 
-import org.jackhuang.hmcl.util.Pair;
-import org.jackhuang.hmcl.util.Range;
+import org.apache.commons.lang3.Range;
 import org.jackhuang.hmcl.util.versioning.VersionNumber;
 import org.junit.Assert;
 import org.junit.Test;
@@ -27,13 +26,13 @@ public class JavaVersionConstraintTest {
 
     @Test
     public void vanillaJava16() {
-        Pair<Range<VersionNumber>, Range<VersionNumber>> range = JavaVersionConstraint.findSuitableJavaVersionRange(
+        JavaVersionConstraint.VersionRanges range = JavaVersionConstraint.findSuitableJavaVersionRange(
                 VersionNumber.asVersion("1.17"),
                 null
         );
 
         Assert.assertEquals(
                 Range.between(VersionNumber.asVersion("16"), VersionNumber.asVersion(JavaVersionConstraint.MAX)),
-                range.getKey());
+                range.getMandatory());
     }
 }

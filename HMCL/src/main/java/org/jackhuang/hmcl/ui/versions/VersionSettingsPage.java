@@ -48,6 +48,7 @@ import org.jackhuang.hmcl.util.Logging;
 import org.jackhuang.hmcl.util.io.FileUtils;
 import org.jackhuang.hmcl.util.javafx.BindingMapping;
 import org.jackhuang.hmcl.util.javafx.SafeStringConverter;
+import org.jackhuang.hmcl.util.platform.Architecture;
 import org.jackhuang.hmcl.util.platform.JavaVersion;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 import org.jackhuang.hmcl.util.versioning.VersionNumber;
@@ -399,7 +400,6 @@ public final class VersionSettingsPage extends StackPane implements DecoratorPag
 
                 txtServerIP = new JFXTextField();
                 txtServerIP.setPromptText(i18n("settings.advanced.server_ip.prompt"));
-                txtServerIP.getStyleClass().add("fit-width");
                 FXUtils.setLimitWidth(txtServerIP, 300);
                 serverPane.addRow(0, new Label(i18n("settings.advanced.server_ip")), txtServerIP);
             }
@@ -545,9 +545,14 @@ public final class VersionSettingsPage extends StackPane implements DecoratorPag
         memoryStatus.set(OperatingSystem.getPhysicalMemoryStatus().orElse(OperatingSystem.PhysicalMemoryStatus.INVALID));
 
         Task.supplyAsync(JavaVersion::getJavas).thenAcceptAsync(Schedulers.javafx(), list -> {
+            boolean isX86 = Architecture.SYSTEM_ARCH.isX86() && list.stream().allMatch(java -> java.getArchitecture().isX86());
+
             List<MultiFileItem.Option<JavaVersion>> options = list.stream()
-                    .map(javaVersion -> new MultiFileItem.Option<>(javaVersion.getVersion() + i18n("settings.game.java_directory.bit",
-                            javaVersion.getPlatform().getBit()), javaVersion)
+                    .map(javaVersion -> new MultiFileItem.Option<>(
+                             i18n("settings.game.java_directory.template",
+                                     javaVersion.getVersion(),
+                                     isX86 ? i18n("settings.game.java_directory.bit",javaVersion.getBits().getBit())
+                                             : javaVersion.getPlatform().getArchitecture().getDisplayName()), javaVersion)
                             .setSubtitle(javaVersion.getBinary().toString()))
                     .collect(Collectors.toList());
             options.add(0, javaAutoDeterminedOption);

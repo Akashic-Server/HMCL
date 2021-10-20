@@ -29,11 +29,15 @@ public final class MultiplayerChannel {
     @JsonType(
             property = "type",
             subtypes = {
+                    @JsonSubtype(clazz = HandshakeRequest.class, name = "handshake"),
                     @JsonSubtype(clazz = JoinRequest.class, name = "join"),
                     @JsonSubtype(clazz = KeepAliveRequest.class, name = "keepalive")
             }
     )
     public static class Request {
+    }
+
+    public static class HandshakeRequest extends Request {
     }
 
     public static class JoinRequest extends Request {
@@ -69,6 +73,7 @@ public final class MultiplayerChannel {
     @JsonType(
             property = "type",
             subtypes = {
+                    @JsonSubtype(clazz = HandshakeResponse.class, name = "handshake"),
                     @JsonSubtype(clazz = JoinResponse.class, name = "join"),
                     @JsonSubtype(clazz = KeepAliveResponse.class, name = "keepalive"),
                     @JsonSubtype(clazz = KickResponse.class, name = "kick")
@@ -78,11 +83,20 @@ public final class MultiplayerChannel {
 
     }
 
+    public static class HandshakeResponse extends Response {
+    }
+
     public static class JoinResponse extends Response {
+        private final String sessionName;
         private final int port;
 
-        public JoinResponse(int port) {
+        public JoinResponse(String sessionName, int port) {
+            this.sessionName = sessionName;
             this.port = port;
+        }
+
+        public String getSessionName() {
+            return sessionName;
         }
 
         public int getPort() {
@@ -112,6 +126,10 @@ public final class MultiplayerChannel {
         public String getMsg() {
             return msg;
         }
+
+        public static final String VERSION_NOT_MATCHED = "version_not_matched";
+        public static final String KICKED = "kicked";
+        public static final String JOIN_ACEEPTANCE_TIMEOUT = "join_acceptance_timeout";
     }
 
     public static class CatoClient extends Event {

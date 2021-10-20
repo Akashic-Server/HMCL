@@ -52,15 +52,31 @@ public class CrashReportAnalyzerTest {
     }
 
     @Test
+    public void jvm32() throws IOException {
+        CrashReportAnalyzer.Result result = findResultByRule(
+                CrashReportAnalyzer.anaylze(loadLog("/logs/jvm_32bit.txt")),
+                CrashReportAnalyzer.Rule.JVM_32BIT);
+    }
+
+    @Test
     public void modResolution() throws IOException {
         CrashReportAnalyzer.Result result = findResultByRule(
                 CrashReportAnalyzer.anaylze(loadLog("/logs/mod_resolution.txt")),
                 CrashReportAnalyzer.Rule.MOD_RESOLUTION);
         Assert.assertEquals(("Errors were found!\n" +
-                " - Mod test depends on mod {fabricloader @ [>=0.11.3]}, which is missing!\n" +
-                " - Mod test depends on mod {fabric @ [*]}, which is missing!\n" +
-                " - Mod test depends on mod {java @ [>=16]}, which is missing!\n").replaceAll("\\s+", ""),
+                        " - Mod test depends on mod {fabricloader @ [>=0.11.3]}, which is missing!\n" +
+                        " - Mod test depends on mod {fabric @ [*]}, which is missing!\n" +
+                        " - Mod test depends on mod {java @ [>=16]}, which is missing!\n").replaceAll("\\s+", ""),
                 result.getMatcher().group("reason").replaceAll("\\s+", ""));
+    }
+
+    @Test
+    public void modResolutionCollection() throws IOException {
+        CrashReportAnalyzer.Result result = findResultByRule(
+                CrashReportAnalyzer.anaylze(loadLog("/logs/mod_resolution_collection.txt")),
+                CrashReportAnalyzer.Rule.MOD_RESOLUTION_COLLECTION);
+        Assert.assertEquals("tabtps-fabric", result.getMatcher().group("sourcemod"));
+        Assert.assertEquals("{fabricloader @ [>=0.11.1]}", result.getMatcher().group("destmod"));
     }
 
     @Test
@@ -231,6 +247,13 @@ public class CrashReportAnalyzerTest {
     }
 
     @Test
+    public void memoryExceeded() throws IOException {
+        CrashReportAnalyzer.Result result = findResultByRule(
+                CrashReportAnalyzer.anaylze(loadLog("/logs/memory_exceeded.txt")),
+                CrashReportAnalyzer.Rule.MEMORY_EXCEEDED);
+    }
+
+    @Test
     public void config() throws IOException {
         CrashReportAnalyzer.Result result = findResultByRule(
                 CrashReportAnalyzer.anaylze(loadLog("/crash-report/config.txt")),
@@ -271,6 +294,20 @@ public class CrashReportAnalyzerTest {
                 CrashReportAnalyzer.Rule.MOD_RESOLUTION_MISSING);
         Assert.assertEquals("pca", result.getMatcher().group("sourcemod"));
         Assert.assertEquals("{fabric @ [>=0.39.2]}", result.getMatcher().group("destmod"));
+    }
+
+    @Test
+    public void fabric0_12() throws IOException {
+        CrashReportAnalyzer.Result result = findResultByRule(
+                CrashReportAnalyzer.anaylze(loadLog("/logs/fabric-version-0.12.txt")),
+                CrashReportAnalyzer.Rule.FABRIC_VERSION_0_12);
+    }
+
+    @Test
+    public void twilightForestOptiFineIncompatible() throws IOException {
+        CrashReportAnalyzer.Result result = findResultByRule(
+                CrashReportAnalyzer.anaylze(loadLog("/crash-report/mod/twilightforest_optifine_incompatibility.txt")),
+                CrashReportAnalyzer.Rule.TWILIGHT_FOREST_OPTIFINE);
     }
 
     @Test
@@ -380,6 +417,13 @@ public class CrashReportAnalyzerTest {
         Assert.assertEquals(
                 new HashSet<>(Collections.singletonList("twilightforest")),
                 CrashReportAnalyzer.findKeywordsFromCrashReport(loadLog("/crash-report/mod/twilightforest.txt")));
+    }
+
+    @Test
+    public void optifine() throws IOException {
+        Assert.assertEquals(
+                new HashSet<>(Collections.singletonList("OptiFine")),
+                CrashReportAnalyzer.findKeywordsFromCrashReport(loadLog("/crash-report/mod/twilightforest_optifine_incompatibility.txt")));
     }
 
     @Test

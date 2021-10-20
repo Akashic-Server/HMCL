@@ -17,22 +17,19 @@
  */
 package org.jackhuang.hmcl.game;
 
-import com.jfoenix.controls.JFXButton;
 import javafx.application.Platform;
 import javafx.stage.Stage;
 import org.jackhuang.hmcl.Launcher;
 import org.jackhuang.hmcl.auth.*;
 import org.jackhuang.hmcl.auth.authlibinjector.AuthlibInjectorDownloadException;
 import org.jackhuang.hmcl.download.DefaultDependencyManager;
+import org.jackhuang.hmcl.download.DownloadProvider;
 import org.jackhuang.hmcl.download.MaintainTask;
 import org.jackhuang.hmcl.download.game.GameAssetIndexDownloadTask;
 import org.jackhuang.hmcl.download.game.GameVerificationFixTask;
 import org.jackhuang.hmcl.download.game.LibraryDownloadException;
 import org.jackhuang.hmcl.download.java.JavaRepository;
-import org.jackhuang.hmcl.launch.NotDecompressingNativesException;
-import org.jackhuang.hmcl.launch.PermissionException;
-import org.jackhuang.hmcl.launch.ProcessCreationException;
-import org.jackhuang.hmcl.launch.ProcessListener;
+import org.jackhuang.hmcl.launch.*;
 import org.jackhuang.hmcl.mod.ModpackConfiguration;
 import org.jackhuang.hmcl.mod.curse.CurseCompletionException;
 import org.jackhuang.hmcl.mod.curse.CurseCompletionTask;
@@ -41,15 +38,14 @@ import org.jackhuang.hmcl.mod.mcbbs.McbbsModpackCompletionTask;
 import org.jackhuang.hmcl.mod.mcbbs.McbbsModpackLocalInstallTask;
 import org.jackhuang.hmcl.mod.server.ServerModpackCompletionTask;
 import org.jackhuang.hmcl.mod.server.ServerModpackLocalInstallTask;
+import org.jackhuang.hmcl.setting.DownloadProviders;
 import org.jackhuang.hmcl.setting.LauncherVisibility;
 import org.jackhuang.hmcl.setting.Profile;
 import org.jackhuang.hmcl.setting.VersionSetting;
 import org.jackhuang.hmcl.task.*;
 import org.jackhuang.hmcl.ui.*;
-import org.jackhuang.hmcl.ui.construct.DialogCloseEvent;
-import org.jackhuang.hmcl.ui.construct.MessageDialogPane;
+import org.jackhuang.hmcl.ui.construct.*;
 import org.jackhuang.hmcl.ui.construct.MessageDialogPane.MessageType;
-import org.jackhuang.hmcl.ui.construct.TaskExecutorDialogPane;
 import org.jackhuang.hmcl.util.*;
 import org.jackhuang.hmcl.util.i18n.I18n;
 import org.jackhuang.hmcl.util.io.ResponseCodeException;
@@ -61,6 +57,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URL;
+import java.nio.file.AccessDeniedException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
@@ -92,7 +89,8 @@ public final class LauncherHelper {
         this.launchingStepsPane.setTitle(i18n("version.launch"));
     }
 
-    private final TaskExecutorDialogPane launchingStepsPane = new TaskExecutorDialogPane(it -> {});
+    private final TaskExecutorDialogPane launchingStepsPane = new TaskExecutorDialogPane(it -> {
+    });
 
     public void setTestMode() {
         launcherVisibility = LauncherVisibility.KEEP;
@@ -283,6 +281,25 @@ public final class LauncherHelper {
                                         message = i18n("download.code.404", url);
                                     else
                                         message = i18n("download.failed", url, responseCode);
+                                } else if (ex instanceof CommandTooLongException) {
+                                    message = i18n("launch.failed.command_too_long");
+                                } else if (ex instanceof ExecutionPolicyLimitException) {
+                                    Controllers.prompt(new PromptDialogPane.Builder(i18n("launch.failed.execution_policy"),
+                                            (result, resolve, reject) -> {
+                                                if (CommandBuilder.setExecutionPolicy()) {
+                                                    LOG.info("Set the ExecutionPolicy for the scope 'CurrentUser' to 'RemoteSigned'");
+                                                    resolve.run();
+                                                } else {
+                                                    LOG.warning("Failed to set ExecutionPolicy");
+                                                    reject.accept(i18n("launch.failed.execution_policy.failed_to_set"));
+                                                }
+                                            })
+                                            .addQuestion(new PromptDialogPane.Builder.HintQuestion(i18n("launch.failed.execution_policy.hint")))
+                                    );
+
+                                    return;
+                                } else if (ex instanceof AccessDeniedException) {
+                                    message = i18n("exception.access_denied", ((AccessDeniedException) ex).getFile());
                                 } else {
                                     message = StringUtils.getStackTrace(ex);
                                 }
@@ -318,7 +335,28 @@ public final class LauncherHelper {
                 Runnable continueAction = () -> future.complete(JavaVersion.fromCurrentEnvironment());
 
                 if (setting.isJavaAutoSelected()) {
-                    Controllers.dialog(i18n("launch.failed.no_accepted_java"), i18n("message.warning"), MessageType.WARNING, continueAction);
+                    JavaVersionConstraint.VersionRanges range = JavaVersionConstraint.findSuitableJavaVersionRange(gameVersion, version);
+                    GameJavaVersion targetJavaVersion;
+
+                    if (range.getMandatory().contains(VersionNumber.asVersion("16"))) {
+                        targetJavaVersion = GameJavaVersion.JAVA_16;
+                    } else if (range.getMandatory().contains(VersionNumber.asVersion("1.8.0_51"))) {
+                        targetJavaVersion = GameJavaVersion.JAVA_8;
+                    } else {
+                        targetJavaVersion = null;
+                    }
+
+                    if (targetJavaVersion != null) {
+                        downloadJava(gameVersion.toString(), targetJavaVersion, profile)
+                                .thenAcceptAsync(downloadedJavaVersion -> {
+                                    future.complete(downloadedJavaVersion);
+                                })
+                                .exceptionally(throwable -> {
+                                    LOG.log(Level.WARNING, "Failed to download java", throwable);
+                                    Controllers.dialog(i18n("launch.failed.no_accepted_java"), i18n("message.warning"), MessageType.WARNING, continueAction);
+                                    return null;
+                                });
+                    }
                 } else {
                     Controllers.dialog(i18n("launch.wrong_javadir"), i18n("message.warning"), MessageType.WARNING, continueAction);
 
@@ -340,9 +378,9 @@ public final class LauncherHelper {
 
             JavaVersionConstraint violatedMandatoryConstraint = null;
             JavaVersionConstraint violatedSuggestedConstraint = null;
-            for (JavaVersionConstraint constraint : JavaVersionConstraint.values()) {
-                if (constraint.getGameVersion().contains(gameVersion) && constraint.appliesToVersion(gameVersion, version)) {
-                    if (!constraint.getJavaVersion(version).contains(javaVersion.getVersionNumber())) {
+            for (JavaVersionConstraint constraint : JavaVersionConstraint.ALL) {
+                if (constraint.appliesToVersion(gameVersion, version, javaVersion)) {
+                    if (!constraint.checkJava(gameVersion, version, javaVersion)) {
                         if (constraint.getType() == JavaVersionConstraint.RULE_MANDATORY) {
                             violatedMandatoryConstraint = constraint;
                         } else if (constraint.getType() == JavaVersionConstraint.RULE_SUGGESTED) {
@@ -370,59 +408,46 @@ public final class LauncherHelper {
                 } else {
                     switch (violatedMandatoryConstraint) {
                         case GAME_JSON:
-                            MessageDialogPane dialog = new MessageDialogPane(
-                                    i18n("launch.advice.require_newer_java_version",
-                                            gameVersion.toString(),
-                                            version.getJavaVersion().getMajorVersion()),
-                                    i18n("message.warning"),
-                                    MessageType.QUESTION);
-
-                            JFXButton linkButton = new JFXButton(i18n("download.external_link"));
-                            linkButton.setOnAction(e -> FXUtils.openLink("https://adoptopenjdk.net/"));
-                            linkButton.getStyleClass().add("dialog-accept");
-                            dialog.addButton(linkButton);
-
-                            JFXButton yesButton = new JFXButton(i18n("button.ok"));
-                            yesButton.setOnAction(event -> {
-                                downloadJava(version.getJavaVersion(), profile)
-                                        .thenAcceptAsync(x -> {
-                                            try {
-                                                Optional<JavaVersion> newAcceptableJava = JavaVersion.getJavas().stream()
-                                                        .filter(newJava -> newJava.getParsedVersion() >= version.getJavaVersion().getMajorVersion())
-                                                        .max(Comparator.comparing(JavaVersion::getVersionNumber));
-                                                if (newAcceptableJava.isPresent()) {
-                                                    setting.setJavaVersion(newAcceptableJava.get());
-                                                    future.complete(newAcceptableJava.get());
-                                                    return;
-                                                }
-                                            } catch (InterruptedException e) {
-                                                LOG.log(Level.SEVERE, "Cannot list javas", e);
-                                            }
-                                            future.complete(javaVersion);
-                                        }, Platform::runLater)
-                                        .exceptionally(Lang.handleUncaught);
-                            });
-                            yesButton.getStyleClass().add("dialog-accept");
-                            dialog.addButton(yesButton);
-
-                            JFXButton noButton = new JFXButton(i18n("button.cancel"));
-                            noButton.getStyleClass().add("dialog-cancel");
-                            dialog.addButton(noButton);
-                            dialog.setCancelButton(noButton);
-
-                            Controllers.dialog(dialog);
+                            downloadJava(gameVersion.toString(), version.getJavaVersion(), profile)
+                                    .thenAcceptAsync(downloadedJavaVersion -> {
+                                        setting.setJavaVersion(downloadedJavaVersion);
+                                        future.complete(downloadedJavaVersion);
+                                    })
+                                    .exceptionally(throwable -> {
+                                        LOG.log(Level.WARNING, "Failed to download java", throwable);
+                                        return null;
+                                    });
                             return Task.fromCompletableFuture(future);
                         case VANILLA_JAVA_16:
                             Controllers.confirm(i18n("launch.advice.require_newer_java_version", gameVersion.toString(), 16), i18n("message.warning"), () -> {
-                                FXUtils.openLink("https://adoptopenjdk.net/");
+                                FXUtils.openLink("https://adoptium.net/?variant=openjdk17");
                             }, breakAction);
                             return null;
                         case VANILLA_JAVA_8:
                             Controllers.dialog(i18n("launch.advice.java8_1_13"), i18n("message.error"), MessageType.ERROR, breakAction);
                             return null;
                         case VANILLA_LINUX_JAVA_8:
-                            Controllers.dialog(i18n("launch.advice.vanilla_linux_java_8"), i18n("message.error"), MessageType.ERROR, breakAction);
-                            return null;
+                            if (setting.getNativesDirType() == NativesDirectoryType.VERSION_FOLDER) {
+                                Controllers.dialog(i18n("launch.advice.vanilla_linux_java_8"), i18n("message.error"), MessageType.ERROR, breakAction);
+                                return null;
+                            } else {
+                                break;
+                            }
+                        case VANILLA_X86:
+                            if (setting.getNativesDirType() == NativesDirectoryType.VERSION_FOLDER) {
+                                if (Architecture.SYSTEM_ARCH == Architecture.ARM64) {
+                                    if (OperatingSystem.CURRENT_OS == OperatingSystem.OSX
+                                            // Windows on ARM introduced translation support for x86-64 after 10.0.21277.
+                                            || (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS && OperatingSystem.SYSTEM_BUILD_NUMBER >= 21277)) {
+                                        Controllers.dialog(i18n("launch.advice.vanilla_x86.translation"), i18n("message.error"), MessageType.ERROR, breakAction);
+                                        return null;
+                                    }
+                                }
+                                Controllers.dialog(i18n("launch.advice.vanilla_x86"), i18n("message.error"), MessageType.ERROR, breakAction);
+                                return null;
+                            } else {
+                                break;
+                            }
                         case LAUNCH_WRAPPER:
                             Controllers.dialog(i18n("launch.advice.java9") + "\n" + i18n("launch.advice.uncorrected"), i18n("message.error"), MessageType.ERROR, breakAction);
                             return null;
@@ -430,20 +455,26 @@ public final class LauncherHelper {
                 }
             }
 
+            if (Architecture.SYSTEM_ARCH == Architecture.X86_64
+                    && javaVersion.getPlatform().getArchitecture() == Architecture.X86) {
+                Controllers.dialog(i18n("launch.advice.different_platform"), i18n("message.warning"), MessageType.ERROR, continueAction);
+                suggested = true;
+            }
+
             // 32-bit JVM cannot make use of too much memory.
-            if (javaVersion.getPlatform() == org.jackhuang.hmcl.util.platform.Platform.BIT_32 &&
+            if (javaVersion.getBits() == Bits.BIT_32 &&
                     setting.getMaxMemory() > 1.5 * 1024) {
                 // 1.5 * 1024 is an inaccurate number.
                 // Actual memory limit depends on operating system and memory.
-                Controllers.confirm(i18n("launch.advice.too_large_memory_for_32bit"), i18n("message.error"), continueAction, null);
-                return null;
+                Controllers.confirm(i18n("launch.advice.too_large_memory_for_32bit"), i18n("message.error"), continueAction, breakAction);
+                suggested = true;
             }
 
-            if (violatedSuggestedConstraint != null) {
+            if (!suggested && violatedSuggestedConstraint != null) {
                 suggested = true;
                 switch (violatedSuggestedConstraint) {
                     case MODDED_JAVA_7:
-                        Controllers.dialog(i18n("launch.advice.java.modded_java_7"), i18n("message.error"), MessageType.ERROR, continueAction);
+                        Controllers.dialog(i18n("launch.advice.java.modded_java_7"), i18n("message.warning"), MessageType.WARNING, continueAction);
                         return null;
                     case MODDED_JAVA_8:
                         Controllers.dialog(i18n("launch.advice.newer_java"), i18n("message.warning"), MessageType.WARNING, continueAction);
@@ -452,11 +483,6 @@ public final class LauncherHelper {
                         Controllers.dialog(i18n("launch.advice.java8_51_1_13"), i18n("message.warning"), MessageType.WARNING, continueAction);
                         break;
                 }
-            }
-
-            if (!suggested && javaVersion.getPlatform() != Architecture.CURRENT.getPlatform()) {
-                Controllers.dialog(i18n("launch.advice.different_platform"), i18n("message.warning"), MessageType.ERROR, continueAction);
-                suggested = true;
             }
 
             // Cannot allocate too much memory exceeding free space.
@@ -498,32 +524,63 @@ public final class LauncherHelper {
         }).withStage("launch.state.java");
     }
 
-    private static CompletableFuture<Void> downloadJava(GameJavaVersion javaVersion, Profile profile) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
+    private static CompletableFuture<JavaVersion> downloadJava(String gameVersion, GameJavaVersion javaVersion, Profile profile) {
+        CompletableFuture<JavaVersion> future = new CompletableFuture<>();
+
+        JFXHyperlink link = new JFXHyperlink(i18n("download.external_link"));
+        link.setOnAction(e -> FXUtils.openLink("https://adoptium.net/?variant=openjdk17"));
+
+        Controllers.dialog(new MessageDialogPane.Builder(
+                i18n("launch.advice.require_newer_java_version",
+                        gameVersion,
+                        javaVersion.getMajorVersion()),
+                i18n("message.warning"),
+                MessageType.QUESTION)
+                .addAction(link)
+                .yesOrNo(() -> {
+                    downloadJavaImpl(javaVersion, profile.getDependency().getDownloadProvider())
+                            .thenAcceptAsync(downloadedJava -> {
+                                future.complete(downloadedJava);
+                            })
+                            .exceptionally(throwable -> {
+                                LOG.log(Level.WARNING, "Failed to download java", throwable);
+                                Controllers.dialog(DownloadProviders.localizeErrorMessage(throwable), i18n("download.failed"));
+                                future.completeExceptionally(new CancellationException());
+                                return null;
+                            });
+                }, () -> {
+                    future.completeExceptionally(new CancellationException());
+                }).build());
+
+        return future;
+    }
+
+    /**
+     * Directly start java downloading.
+     *
+     * @param javaVersion target Java version
+     * @param downloadProvider download provider
+     * @return JavaVersion, null if we failed to download java, failed if an error occurred when downloading.
+     */
+    private static CompletableFuture<JavaVersion> downloadJavaImpl(GameJavaVersion javaVersion, DownloadProvider downloadProvider) {
+        CompletableFuture<JavaVersion> future = new CompletableFuture<>();
 
         TaskExecutorDialogPane javaDownloadingPane = new TaskExecutorDialogPane(it -> {
         });
 
-        TaskExecutor executor = JavaRepository.downloadJava(javaVersion,
-                profile.getDependency().getDownloadProvider()).executor(false);
-        executor.addTaskListener(new TaskListener() {
-            @Override
-            public void onStop(boolean success, TaskExecutor executor) {
-                super.onStop(success, executor);
-                Platform.runLater(() -> {
-                    if (!success) {
-                        future.completeExceptionally(Optional.ofNullable(executor.getException()).orElseGet(InterruptedException::new));
+        TaskExecutor executor = JavaRepository.downloadJava(javaVersion, downloadProvider)
+                .whenComplete(Schedulers.javafx(), (downloadedJava, exception) -> {
+                    if (exception != null) {
+                        future.completeExceptionally(exception);
                     } else {
-                        future.complete(null);
+                        future.complete(downloadedJava);
                     }
-                });
-            }
-        });
+                })
+                .executor(false);
 
         javaDownloadingPane.setExecutor(executor, true);
         Controllers.dialog(javaDownloadingPane);
         executor.start();
-
 
         return future;
     }
@@ -597,6 +654,11 @@ public final class LauncherHelper {
                 command = command.replace(entry.getKey(), entry.getValue());
 
             LOG.info("Launched process: " + command);
+
+            String classpath = process.getClasspath();
+            if (classpath != null) {
+                LOG.info("Process ClassPath: " + classpath);
+            }
 
             if (showLogs)
                 Platform.runLater(() -> {
@@ -693,6 +755,7 @@ public final class LauncherHelper {
     }
 
     public static final Queue<ManagedProcess> PROCESSES = new ConcurrentLinkedQueue<>();
+
     public static void stopManagedProcesses() {
         while (!PROCESSES.isEmpty())
             Optional.ofNullable(PROCESSES.poll()).ifPresent(ManagedProcess::stop);

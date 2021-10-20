@@ -69,8 +69,8 @@ public class GameCrashWindow extends Stage {
     private final String memory;
     private final String java;
     private final LibraryAnalyzer analyzer;
-    private final StringProperty os = new SimpleStringProperty(System.getProperty("os.name"));
-    private final StringProperty arch = new SimpleStringProperty(Architecture.SYSTEM_ARCHITECTURE);
+    private final StringProperty os = new SimpleStringProperty(OperatingSystem.SYSTEM_NAME);
+    private final StringProperty arch = new SimpleStringProperty(Architecture.SYSTEM_ARCH.getDisplayName());
     private final StringProperty reason = new SimpleStringProperty(i18n("game.crash.reason.unknown"));
     private final BooleanProperty loading = new SimpleBooleanProperty();
     private final Label feedbackLabel = new Label(i18n("game.crash.feedback"));
@@ -81,9 +81,9 @@ public class GameCrashWindow extends Stage {
     private final LaunchOptions launchOptions;
     private final View view;
 
-    private final LinkedList<Pair<String, Log4jLevel>> logs;
+    private final List<Pair<String, Log4jLevel>> logs;
 
-    public GameCrashWindow(ManagedProcess managedProcess, ProcessListener.ExitType exitType, DefaultGameRepository repository, Version version, LaunchOptions launchOptions, LinkedList<Pair<String, Log4jLevel>> logs) {
+    public GameCrashWindow(ManagedProcess managedProcess, ProcessListener.ExitType exitType, DefaultGameRepository repository, Version version, LaunchOptions launchOptions, List<Pair<String, Log4jLevel>> logs) {
         this.managedProcess = managedProcess;
         this.exitType = exitType;
         this.repository = repository;
@@ -93,7 +93,10 @@ public class GameCrashWindow extends Stage {
         this.analyzer = LibraryAnalyzer.analyze(version);
 
         memory = Optional.ofNullable(launchOptions.getMaxMemory()).map(i -> i + " MB").orElse("-");
-        java = launchOptions.getJava().getVersion();
+
+        this.java = launchOptions.getJava().getArchitecture() == Architecture.SYSTEM_ARCH
+                ? launchOptions.getJava().getVersion()
+                : launchOptions.getJava().getVersion() + " (" + launchOptions.getJava().getArchitecture().getDisplayName() + ")";
 
         this.view = new View();
 
@@ -110,13 +113,17 @@ public class GameCrashWindow extends Stage {
         CompletableFuture.supplyAsync(() -> {
             String rawLog = logs.stream().map(Pair::getKey).collect(Collectors.joining("\n"));
             Set<String> keywords = Collections.emptySet();
+            String crashReport = null;
             try {
-                String crashReport = CrashReportAnalyzer.findCrashReport(rawLog);
-                if (crashReport != null) {
-                    keywords = CrashReportAnalyzer.findKeywordsFromCrashReport(crashReport);
-                }
+                crashReport = CrashReportAnalyzer.findCrashReport(rawLog);
             } catch (IOException e) {
                 LOG.log(Level.WARNING, "Failed to read crash report", e);
+            }
+            if (crashReport == null) {
+                crashReport = CrashReportAnalyzer.extractCrashReport(rawLog);
+            }
+            if (crashReport != null) {
+                keywords = CrashReportAnalyzer.findKeywordsFromCrashReport(crashReport);
             }
             return pair(
                     CrashReportAnalyzer.anaylze(rawLog),
@@ -140,6 +147,7 @@ public class GameCrashWindow extends Stage {
                             break;
                         case MOD_RESOLUTION_CONFLICT:
                         case MOD_RESOLUTION_MISSING:
+                        case MOD_RESOLUTION_COLLECTION:
                             reasonText.append(i18n("game.crash.reason." + result.getRule().name().toLowerCase(Locale.ROOT),
                                     translateFabricModId(result.getMatcher().group("sourcemod")),
                                     parseFabricModId(result.getMatcher().group("destmod")),
@@ -149,6 +157,9 @@ public class GameCrashWindow extends Stage {
                             reasonText.append(i18n("game.crash.reason." + result.getRule().name().toLowerCase(Locale.ROOT),
                                     translateFabricModId(result.getMatcher().group("mod")),
                                     result.getMatcher().group("version")));
+                            break;
+                        case TWILIGHT_FOREST_OPTIFINE:
+                            reasonText.append(i18n("game.crash.reason.mod", "OptiFine"));
                             break;
                         default:
                             reasonText.append(i18n("game.crash.reason." + result.getRule().name().toLowerCase(Locale.ROOT),
@@ -177,6 +188,8 @@ public class GameCrashWindow extends Stage {
 
     private String translateFabricModId(String modName) {
         switch (modName) {
+            case "fabricloader":
+                return "Fabric";
             case "fabric":
                 return "Fabric API";
             case "minecraft":
@@ -204,6 +217,7 @@ public class GameCrashWindow extends Stage {
         LogWindow logWindow = new LogWindow();
 
         logWindow.logLine("Command: " + new CommandBuilder().addAll(managedProcess.getCommands()).toString(), Log4jLevel.INFO);
+        logWindow.logLine("ClassPath: " + managedProcess.getClasspath(), Log4jLevel.INFO);
         for (Map.Entry<String, Log4jLevel> entry : logs)
             logWindow.logLine(entry.getKey(), entry.getValue());
 
