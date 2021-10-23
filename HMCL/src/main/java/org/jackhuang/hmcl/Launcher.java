@@ -21,6 +21,7 @@ import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.stage.Stage;
 import org.jackhuang.hmcl.setting.ConfigHolder;
+import org.jackhuang.hmcl.setting.SambaException;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.task.AsyncTaskExecutor;
 import org.jackhuang.hmcl.ui.AwtUtils;
@@ -62,6 +63,8 @@ public final class Launcher extends Application {
         try {
             try {
                 ConfigHolder.init();
+            } catch (SambaException ignored) {
+                Main.showWarningAndContinue(i18n("fatal.samba"));
             } catch (IOException e) {
                 LOG.log(Level.SEVERE, "Failed to load config", e);
                 Main.showErrorAndExit(i18n("fatal.config_loading_failure", Paths.get("").toAbsolutePath().normalize()));
@@ -119,7 +122,7 @@ public final class Launcher extends Application {
             ManagementFactory.getMemoryPoolMXBeans().stream().filter(bean -> bean.getName().equals("Metaspace")).findAny()
                     .ifPresent(bean -> LOG.info("Metaspace: " + bean.getUsage().getUsed() / 1024 / 1024 + "MB"));
 
-            launch(args);
+            launch(Launcher.class, args);
         } catch (Throwable e) { // Fucking JavaFX will suppress the exception and will break our crash reporter.
             CRASH_REPORTER.uncaughtException(Thread.currentThread(), e);
         }

@@ -36,6 +36,7 @@ import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.util.StringUtils;
 
 import java.util.Collection;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -61,7 +62,7 @@ public class MultiFileItem<T> extends VBox {
         });
         selectedData.addListener((a, b, newValue) -> {
             Optional<Toggle> selecting = group.getToggles().stream()
-                    .filter(it -> it.getUserData() == newValue)
+                    .filter(it -> Objects.equals(it.getUserData(), newValue))
                     .findFirst();
             if (!selecting.isPresent()) {
                 selecting = group.getToggles().stream()
@@ -226,6 +227,11 @@ public class MultiFileItem<T> extends VBox {
 
             BorderPane.setAlignment(customField, Pos.CENTER_RIGHT);
             customField.disableProperty().bind(left.selectedProperty().not());
+
+            if (!customField.getValidators().isEmpty()) {
+                FXUtils.setValidateWhileTextChanged(customField, true);
+            }
+
             pane.setRight(customField);
 
             return pane;
