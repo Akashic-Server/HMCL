@@ -44,7 +44,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.*;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -60,7 +59,7 @@ import static org.jackhuang.hmcl.util.Pair.pair;
  * Cato Management.
  */
 public final class MultiplayerManager {
-    static final String CATO_VERSION = "1.1.1-202110231414";
+    static final String CATO_VERSION = "1.1.1";
     //    private static final String CATO_DOWNLOAD_URL = "https://files.huangyuhui.net/maven/cato/cato/" + MultiplayerManager.CATO_VERSION;
     private static final String CATO_DOWNLOAD_URL = "https://codechina.csdn.net/to/ioi_bin/-/raw/acb0524bcad82a31fa5a09bf4c79248ebd674de1/client/";
     private static final String CATO_PATH = getCatoPath();
@@ -198,7 +197,7 @@ public final class MultiplayerManager {
                     task.cancel();
                 });
                 client.onKicked().register(kickedEvent -> {
-                    future.completeExceptionally(new CancellationException());
+                    future.completeExceptionally(new KickedException(kickedEvent.getReason()));
                     session.stop();
                     task.cancel();
                 });
@@ -229,6 +228,7 @@ public final class MultiplayerManager {
             MultiplayerServer server = new MultiplayerServer(sessionName, gamePort, allowAllJoinRequests);
             server.startServer();
 
+            session.setName(sessionName);
             session.allowForwardingAddress(REMOTE_ADDRESS, server.getPort());
             session.allowForwardingAddress(REMOTE_ADDRESS, gamePort);
             session.showAllowedAddress();
@@ -264,7 +264,7 @@ public final class MultiplayerManager {
         }));
     }
 
-    public static final Pattern INVITATION_CODE_PATTERN = Pattern.compile("^(?<id>(idx|mix)(.*?))#(?<port>\\d{2,5})$");
+    public static final Pattern INVITATION_CODE_PATTERN = Pattern.compile("^(?<id>.*?)#(?<port>\\d{2,5})$");
 
     public static Invitation parseInvitationCode(String invitationCode) throws JsonParseException {
         Matcher matcher = INVITATION_CODE_PATTERN.matcher(invitationCode);
@@ -593,6 +593,18 @@ public final class MultiplayerManager {
     }
 
     public static class ConnectionErrorException extends RuntimeException {
+    }
+
+    public static class KickedException extends RuntimeException {
+        private final String reason;
+
+        public KickedException(String reason) {
+            this.reason = reason;
+        }
+
+        public String getReason() {
+            return reason;
+        }
     }
 
     public static class CatoNotExistsException extends RuntimeException {

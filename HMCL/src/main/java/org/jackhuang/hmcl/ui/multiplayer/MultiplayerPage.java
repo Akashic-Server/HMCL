@@ -38,7 +38,9 @@ import org.jackhuang.hmcl.ui.construct.*;
 import org.jackhuang.hmcl.ui.decorator.DecoratorAnimatedPage;
 import org.jackhuang.hmcl.ui.decorator.DecoratorPage;
 import org.jackhuang.hmcl.util.HMCLService;
+import org.jackhuang.hmcl.util.Result;
 import org.jackhuang.hmcl.util.StringUtils;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -58,7 +60,7 @@ public class MultiplayerPage extends DecoratorAnimatedPage implements DecoratorP
 
     private final ObjectProperty<MultiplayerManager.State> multiplayerState = new SimpleObjectProperty<>(MultiplayerManager.State.DISCONNECTED);
     private final ReadOnlyStringWrapper token = new ReadOnlyStringWrapper();
-    private final ReadOnlyObjectWrapper<DiscoveryInfo> natState = new ReadOnlyObjectWrapper<>();
+    private final ReadOnlyObjectWrapper<@Nullable Result<DiscoveryInfo>> natState = new ReadOnlyObjectWrapper<>();
     private final ReadOnlyIntegerWrapper gamePort = new ReadOnlyIntegerWrapper(-1);
     private final ReadOnlyObjectWrapper<MultiplayerManager.CatoSession> session = new ReadOnlyObjectWrapper<>();
     private final ObservableList<MultiplayerChannel.CatoClient> clients = FXCollections.observableArrayList();
@@ -97,11 +99,11 @@ public class MultiplayerPage extends DecoratorAnimatedPage implements DecoratorP
         this.multiplayerState.set(multiplayerState);
     }
 
-    public DiscoveryInfo getNatState() {
+    public Result<DiscoveryInfo> getNatState() {
         return natState.get();
     }
 
-    public ReadOnlyObjectProperty<DiscoveryInfo> natStateProperty() {
+    public ReadOnlyObjectProperty<Result<DiscoveryInfo>> natStateProperty() {
         return natState.getReadOnlyProperty();
     }
 
@@ -134,12 +136,12 @@ public class MultiplayerPage extends DecoratorAnimatedPage implements DecoratorP
             DiscoveryTest tester = new DiscoveryTest(null, 0, "stun.stunprotocol.org", 3478);
             return tester.test();
         }).whenComplete(Schedulers.javafx(), (info, exception) -> {
-            LOG.log(Level.INFO, "Nat test result " + MultiplayerPageSkin.getNATType(info), exception);
             if (exception == null) {
-                natState.set(info);
+                natState.set(Result.ok(info));
             } else {
-                natState.set(null);
+                natState.set(Result.error());
             }
+            LOG.log(Level.INFO, "Nat test result " + MultiplayerPageSkin.getNATType(natState.get()), exception);
         }).start();
     }
 
@@ -345,7 +347,10 @@ public class MultiplayerPage extends DecoratorAnimatedPage implements DecoratorP
         Throwable e = resolveException(t);
         if (e instanceof CancellationException) {
             LOG.info("Connection rejected by the server");
-            return i18n("multiplayer.session.join.rejected");
+            return i18n("message.cancelled");
+        } else if (e instanceof MultiplayerManager.KickedException) {
+            LOG.info("Kicked by server");
+            return i18n("multiplayer.session.join.kicked", localizeKickMessage(((MultiplayerManager.KickedException) e).getReason()));
         } else if (e instanceof MultiplayerManager.CatoAlreadyStartedException) {
             LOG.info("Cato already started");
             return i18n("multiplayer.session.error.already_started");
@@ -503,4 +508,5 @@ public class MultiplayerPage extends DecoratorAnimatedPage implements DecoratorP
     public ReadOnlyObjectProperty<State> stateProperty() {
         return state;
     }
+
 }
