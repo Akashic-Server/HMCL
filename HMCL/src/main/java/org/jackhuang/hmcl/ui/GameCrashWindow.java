@@ -221,7 +221,7 @@ public class GameCrashWindow extends Stage {
         LogWindow logWindow = new LogWindow();
 
         logWindow.logLine("Command: " + new CommandBuilder().addAll(managedProcess.getCommands()).toString(), Log4jLevel.INFO);
-        logWindow.logLine("ClassPath: " + managedProcess.getClasspath(), Log4jLevel.INFO);
+        if (managedProcess.getClasspath() != null) logWindow.logLine("ClassPath: " + managedProcess.getClasspath(), Log4jLevel.INFO);
         for (Map.Entry<String, Log4jLevel> entry : logs)
             logWindow.logLine(entry.getKey(), entry.getValue());
 
@@ -315,13 +315,15 @@ public class GameCrashWindow extends Stage {
                 moddedPane.setAlignment(Pos.CENTER_LEFT);
 
                 for (LibraryAnalyzer.LibraryType type : LibraryAnalyzer.LibraryType.values()) {
-                    analyzer.getVersion(type).ifPresent(ver -> {
-                        TwoLineListItem item = new TwoLineListItem();
-                        item.getStyleClass().setAll("two-line-item-second-large");
-                        item.setTitle(i18n("install.installer." + type.getPatchId()));
-                        item.setSubtitle(ver);
-                        moddedPane.getChildren().add(item);
-                    });
+                    if (!type.getPatchId().isEmpty()) {
+                        analyzer.getVersion(type).ifPresent(ver -> {
+                            TwoLineListItem item = new TwoLineListItem();
+                            item.getStyleClass().setAll("two-line-item-second-large");
+                            item.setTitle(i18n("install.installer." + type.getPatchId()));
+                            item.setSubtitle(ver);
+                            moddedPane.getChildren().add(item);
+                        });
+                    }
                 }
             }
 
