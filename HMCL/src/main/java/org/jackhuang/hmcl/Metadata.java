@@ -38,7 +38,7 @@ public final class Metadata {
     public static final String FULL_TITLE = FULL_NAME + " v" + VERSION;
 
     public static final String UPDATE_URL = System.getProperty("hmcl.update_source.override", "https://hmcl.akashic.cc/api/update_link");
-    public static final String CONTACT_URL = "https://github.com/Akashic-Server/HMCL";
+    public static final String CONTACT_URL = "https://github.com/Akashic-Server/HMCL/issues";
     public static final String HELP_URL = "https://hmcl.huangyuhui.net/help";
     public static final String CHANGELOG_URL = "https://github.com/Akashic-Server/HMCL";
     public static final String PUBLISH_URL = "https://github.com/Akashic-Server/HMCL";
