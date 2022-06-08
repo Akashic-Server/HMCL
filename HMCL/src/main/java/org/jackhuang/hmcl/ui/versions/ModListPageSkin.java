@@ -158,7 +158,7 @@ class ModListPageSkin extends SkinBase<ModListPage> {
             if (isNotBlank(localModFile.getAuthors()))
                 message.append(", ").append(i18n("archive.author")).append(": ").append(localModFile.getAuthors());
             this.message = message.toString();
-            this.mod = ModTranslations.getModById(localModFile.getId());
+            this.mod = ModTranslations.MOD.getModById(localModFile.getId());
         }
 
         String getTitle() {
@@ -261,7 +261,7 @@ class ModListPageSkin extends SkinBase<ModListPage> {
                 mcmodButton.setText(i18n("mods.mcmod.page"));
                 mcmodButton.setOnAction(e -> {
                     fireEvent(new DialogCloseEvent());
-                    FXUtils.openLink(ModManager.getMcmodUrl(modInfo.getMod().getMcmod()));
+                    FXUtils.openLink(ModTranslations.MOD.getMcmodUrl(modInfo.getMod()));
                 });
                 getActions().add(mcmodButton);
             }
