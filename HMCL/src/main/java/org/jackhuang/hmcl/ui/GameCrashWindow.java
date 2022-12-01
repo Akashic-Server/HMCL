@@ -42,13 +42,13 @@ import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.ui.construct.TwoLineListItem;
 import org.jackhuang.hmcl.util.Lang;
 import org.jackhuang.hmcl.util.Log4jLevel;
+import org.jackhuang.hmcl.util.Logging;
 import org.jackhuang.hmcl.util.Pair;
 import org.jackhuang.hmcl.util.platform.Architecture;
 import org.jackhuang.hmcl.util.platform.CommandBuilder;
 import org.jackhuang.hmcl.util.platform.ManagedProcess;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 
-import java.awt.*;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -77,7 +77,7 @@ public class GameCrashWindow extends Stage {
     private final StringProperty arch = new SimpleStringProperty(Architecture.SYSTEM_ARCH.getDisplayName());
     private final TextFlow reasonTextFlow = new TextFlow(new Text(i18n("game.crash.reason.unknown")));
     private final BooleanProperty loading = new SimpleBooleanProperty();
-    private final Label feedbackLabel = new Label(i18n("game.crash.feedback"));
+    private final TextFlow feedbackTextFlow = new TextFlow();
 
     private final ManagedProcess managedProcess;
     private final DefaultGameRepository repository;
@@ -85,9 +85,9 @@ public class GameCrashWindow extends Stage {
     private final LaunchOptions launchOptions;
     private final View view;
 
-    private final List<Pair<String, Log4jLevel>> logs;
+    private final Collection<Pair<String, Log4jLevel>> logs;
 
-    public GameCrashWindow(ManagedProcess managedProcess, ProcessListener.ExitType exitType, DefaultGameRepository repository, Version version, LaunchOptions launchOptions, List<Pair<String, Log4jLevel>> logs) {
+    public GameCrashWindow(ManagedProcess managedProcess, ProcessListener.ExitType exitType, DefaultGameRepository repository, Version version, LaunchOptions launchOptions, Collection<Pair<String, Log4jLevel>> logs) {
         this.managedProcess = managedProcess;
         this.exitType = exitType;
         this.repository = repository;
@@ -103,6 +103,8 @@ public class GameCrashWindow extends Stage {
                 : launchOptions.getJava().getVersion() + " (" + launchOptions.getJava().getArchitecture().getDisplayName() + ")";
 
         this.view = new View();
+
+        this.feedbackTextFlow.getChildren().addAll(FXUtils.parseSegment(i18n("game.crash.feedback"), Controllers::onHyperlinkAction));
 
         setScene(new Scene(view, 800, 480));
         getScene().getStylesheets().addAll(config().getTheme().getStylesheets(config().getLauncherFontFamily()));
@@ -137,7 +139,7 @@ public class GameCrashWindow extends Stage {
 
             if (exception != null) {
                 LOG.log(Level.WARNING, "Failed to analyze crash report", exception);
-                reasonTextFlow.getChildren().setAll(new Text(i18n("game.crash.reason.unknown")));
+                reasonTextFlow.getChildren().setAll(FXUtils.parseSegment(i18n("game.crash.reason.unknown"), Controllers::onHyperlinkAction));
             } else {
                 List<CrashReportAnalyzer.Result> results = pair.getKey();
                 Set<String> keywords = pair.getValue();
@@ -177,12 +179,12 @@ public class GameCrashWindow extends Stage {
                     if (!keywords.isEmpty()) {
                         reasonTextFlow.getChildren().setAll(new Text(i18n("game.crash.reason.stacktrace", String.join(", ", keywords))));
                     } else {
-                        reasonTextFlow.getChildren().setAll(new Text(i18n("game.crash.reason.unknown")));
+                        reasonTextFlow.getChildren().setAll(FXUtils.parseSegment(i18n("game.crash.reason.unknown"), Controllers::onHyperlinkAction));
                     }
 
-                    feedbackLabel.setVisible(true);
+                    feedbackTextFlow.setVisible(true);
                 } else {
-                    feedbackLabel.setVisible(false);
+                    feedbackTextFlow.setVisible(false);
                     reasonTextFlow.getChildren().setAll(segments);
                 }
             }
@@ -221,7 +223,7 @@ public class GameCrashWindow extends Stage {
     private void showLogWindow() {
         LogWindow logWindow = new LogWindow();
 
-        logWindow.logLine("Command: " + new CommandBuilder().addAll(managedProcess.getCommands()).toString(), Log4jLevel.INFO);
+        logWindow.logLine(Logging.filterForbiddenToken("Command: " + new CommandBuilder().addAll(managedProcess.getCommands())), Log4jLevel.INFO);
         if (managedProcess.getClasspath() != null) logWindow.logLine("ClassPath: " + managedProcess.getClasspath(), Log4jLevel.INFO);
         for (Map.Entry<String, Log4jLevel> entry : logs)
             logWindow.logLine(entry.getKey(), entry.getValue());
@@ -237,15 +239,11 @@ public class GameCrashWindow extends Stage {
                 .thenComposeAsync(logs ->
                         LogExporter.exportLogs(logFile, repository, launchOptions.getVersionName(), logs, new CommandBuilder().addAll(managedProcess.getCommands()).toString()))
                 .thenRunAsync(() -> {
+                    FXUtils.showFileInExplorer(logFile);
+
                     Alert alert = new Alert(Alert.AlertType.INFORMATION, i18n("settings.launcher.launcher_log.export.success", logFile));
                     alert.setTitle(i18n("settings.launcher.launcher_log.export"));
                     alert.showAndWait();
-                    if (Desktop.isDesktopSupported()) {
-                        try {
-                            Desktop.getDesktop().open(logFile.toFile());
-                        } catch (IOException | IllegalArgumentException ignored) {
-                        }
-                    }
                 }, Schedulers.javafx())
                 .exceptionally(e -> {
                     LOG.log(Level.WARNING, "Failed to export game crash info", e);
@@ -350,7 +348,7 @@ public class GameCrashWindow extends Stage {
 
                 gameDirPane.setPadding(new Insets(8));
                 VBox.setVgrow(gameDirPane, Priority.ALWAYS);
-                gameDirPane.getChildren().setAll(gameDir, javaDir, new VBox(reasonTitle, reasonTextFlow));
+                gameDirPane.getChildren().setAll(gameDir, javaDir, new VBox(reasonTitle, reasonTextFlow, feedbackTextFlow));
             }
 
             HBox toolBar = new HBox();
@@ -368,7 +366,7 @@ public class GameCrashWindow extends Stage {
                 toolBar.setPadding(new Insets(8));
                 toolBar.setSpacing(8);
                 toolBar.getStyleClass().add("jfx-tool-bar");
-                toolBar.getChildren().setAll(exportGameCrashInfoButton, logButton, feedbackLabel);
+                toolBar.getChildren().setAll(exportGameCrashInfoButton, logButton);
             }
 
             getChildren().setAll(titlePane, infoPane, moddedPane, gameDirPane, toolBar);

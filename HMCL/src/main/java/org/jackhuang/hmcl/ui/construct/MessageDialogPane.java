@@ -23,8 +23,12 @@ import javafx.fxml.FXML;
 import javafx.scene.Node;
 import javafx.scene.control.ButtonBase;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.scene.text.TextFlow;
 import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.ui.Controllers;
 import org.jackhuang.hmcl.ui.FXUtils;
@@ -69,7 +73,17 @@ public final class MessageDialogPane extends StackPane {
     public MessageDialogPane(@NotNull String text, @Nullable String title, @NotNull MessageType type) {
         FXUtils.loadFXML(this, "/assets/fxml/message-dialog.fxml");
 
-        content.getChildren().setAll(FXUtils.segmentToTextFlow(text, Controllers::onHyperlinkAction));
+        EnhancedTextFlow textFlow = new EnhancedTextFlow();
+        textFlow.getChildren().setAll(FXUtils.parseSegment(text, Controllers::onHyperlinkAction));
+
+        if (textFlow.computePrefHeight(400.0) <= 350.0)
+            content.getChildren().setAll(textFlow);
+        else {
+            ScrollPane scrollPane = new ScrollPane(textFlow);
+            VBox.setVgrow(scrollPane, Priority.ALWAYS);
+            scrollPane.setFitToWidth(true);
+            content.getChildren().setAll(scrollPane);
+        }
 
         if (title != null)
             this.title.setText(title);
@@ -114,6 +128,13 @@ public final class MessageDialogPane extends StackPane {
         return cancelButton;
     }
 
+    private static final class EnhancedTextFlow extends TextFlow {
+        @Override
+        public double computePrefHeight(double width) {
+            return super.computePrefHeight(width);
+        }
+    }
+
     public static class Builder {
         private final MessageDialogPane dialog;
 
@@ -123,10 +144,11 @@ public final class MessageDialogPane extends StackPane {
 
         public Builder addAction(Node actionNode) {
             dialog.addButton(actionNode);
+            actionNode.getStyleClass().add("dialog-accept");
             return this;
         }
 
-        public Builder ok(Runnable ok) {
+        public Builder ok(@Nullable Runnable ok) {
             JFXButton btnOk = new JFXButton(i18n("button.ok"));
             btnOk.getStyleClass().add("dialog-accept");
             if (ok != null) {
@@ -137,7 +159,22 @@ public final class MessageDialogPane extends StackPane {
             return this;
         }
 
-        public Builder yesOrNo(Runnable yes, Runnable no) {
+        public Builder addCancel(@Nullable Runnable cancel) {
+            return addCancel(i18n("button.cancel"), cancel);
+        }
+
+        public Builder addCancel(String cancelText, @Nullable Runnable cancel) {
+            JFXButton btnCancel = new JFXButton(cancelText);
+            btnCancel.getStyleClass().add("dialog-cancel");
+            if (cancel != null) {
+                btnCancel.setOnAction(e -> cancel.run());
+            }
+            dialog.addButton(btnCancel);
+            dialog.setCancelButton(btnCancel);
+            return this;
+        }
+
+        public Builder yesOrNo(@Nullable Runnable yes, @Nullable Runnable no) {
             JFXButton btnYes = new JFXButton(i18n("button.yes"));
             btnYes.getStyleClass().add("dialog-accept");
             if (yes != null) {
@@ -145,27 +182,14 @@ public final class MessageDialogPane extends StackPane {
             }
             dialog.addButton(btnYes);
 
-            JFXButton btnNo = new JFXButton(i18n("button.no"));
-            btnNo.getStyleClass().add("dialog-cancel");
-            if (no != null) {
-                btnNo.setOnAction(e -> no.run());
-            }
-            dialog.addButton(btnNo);
-            dialog.setCancelButton(btnNo);
+            addCancel(i18n("button.no"), no);
             return this;
         }
 
         public Builder actionOrCancel(ButtonBase actionButton, Runnable cancel) {
             dialog.addButton(actionButton);
 
-            JFXButton btnCancel = new JFXButton(i18n("button.cancel"));
-            btnCancel.getStyleClass().add("dialog-cancel");
-            if (cancel != null) {
-                btnCancel.setOnAction(e -> cancel.run());
-            }
-            dialog.addButton(btnCancel);
-            dialog.setCancelButton(btnCancel);
-
+            addCancel(cancel);
             return this;
         }
 

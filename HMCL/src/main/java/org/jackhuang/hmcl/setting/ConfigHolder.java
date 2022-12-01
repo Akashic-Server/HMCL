@@ -22,6 +22,7 @@ import com.google.gson.JsonParseException;
 import org.jackhuang.hmcl.Metadata;
 import org.jackhuang.hmcl.util.InvocationDispatcher;
 import org.jackhuang.hmcl.util.Lang;
+import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.io.FileUtils;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 
@@ -45,6 +46,7 @@ public final class ConfigHolder {
     private static Config configInstance;
     private static GlobalConfig globalConfigInstance;
     private static boolean newlyCreated;
+    private static boolean ownerChanged = false;
 
     public static Config config() {
         if (configInstance == null) {
@@ -60,8 +62,16 @@ public final class ConfigHolder {
         return globalConfigInstance;
     }
 
+    public static Path configLocation() {
+        return configLocation;
+    }
+
     public static boolean isNewlyCreated() {
         return newlyCreated;
+    }
+
+    public static boolean isOwnerChanged() {
+        return ownerChanged;
     }
 
     public synchronized static void init() throws IOException {
@@ -109,7 +119,7 @@ public final class ConfigHolder {
     }
 
     private static Path locateConfig() {
-        Path exePath = Paths.get("");
+        Path exePath = Paths.get("").toAbsolutePath();
         try {
             Path jarPath = Paths.get(ConfigHolder.class.getProtectionDomain().getCodeSource().getLocation()
                     .toURI()).toAbsolutePath();
@@ -143,6 +153,15 @@ public final class ConfigHolder {
 
     private static Config loadConfig() throws IOException {
         if (Files.exists(configLocation)) {
+            try {
+                if (OperatingSystem.CURRENT_OS != OperatingSystem.WINDOWS
+                        && "root".equals(System.getProperty("user.name"))
+                        && !"root".equals(Files.getOwner(configLocation).getName())) {
+                    ownerChanged = true;
+                }
+            } catch (IOException e1) {
+                LOG.log(Level.WARNING, "Failed to get owner");
+            }
             try {
                 String content = FileUtils.readText(configLocation);
                 Config deserialized = Config.fromJson(content);
@@ -189,6 +208,28 @@ public final class ConfigHolder {
     // Global Config
 
     private static GlobalConfig loadGlobalConfig() throws IOException {
+        // Migrate from old directory
+        if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX && Files.notExists(GLOBAL_CONFIG_PATH)) {
+            Path oldHome;
+            String xdgCache = System.getenv("XDG_CACHE_HOME");
+            if (StringUtils.isNotBlank(xdgCache)) {
+                oldHome = Paths.get(xdgCache, "hmcl");
+            } else {
+                oldHome = Paths.get(System.getProperty("user.home", "."), ".cache", "hmcl");
+            }
+
+            if (Files.exists(oldHome)) {
+                Path oldConfigPath = oldHome.resolve("config.json");
+                if (Files.isRegularFile(oldConfigPath)) {
+                    try {
+                        Files.copy(oldConfigPath, GLOBAL_CONFIG_PATH);
+                    } catch (IOException e) {
+                        LOG.log(Level.WARNING, "Failed to migrate global config", e);
+                    }
+                }
+            }
+        }
+
         if (Files.exists(GLOBAL_CONFIG_PATH)) {
             try {
                 String content = FileUtils.readText(GLOBAL_CONFIG_PATH);

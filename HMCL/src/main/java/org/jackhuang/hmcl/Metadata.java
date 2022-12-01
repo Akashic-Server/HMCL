@@ -18,11 +18,9 @@
 package org.jackhuang.hmcl;
 
 import org.jackhuang.hmcl.util.io.JarUtils;
-import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * Stores metadata about this application.
@@ -32,7 +30,7 @@ public final class Metadata {
 
     public static final String NAME = "Akashic Launcher";
     public static final String FULL_NAME = "Hello Minecraft! Launcher Akashic Server Version";
-    public static final String VERSION = System.getProperty("hmcl.version.override", JarUtils.thisJar().flatMap(JarUtils::getImplementationVersion).orElse("@develop@"));
+    public static final String VERSION = System.getProperty("hmcl.version.override", JarUtils.getManifestAttribute("Implementation-Version", "@develop@"));
 
     public static final String TITLE = NAME + " " + VERSION;
     public static final String FULL_TITLE = FULL_NAME + " v" + VERSION;
@@ -44,23 +42,10 @@ public final class Metadata {
     public static final String PUBLISH_URL = "https://github.com/Akashic-Server/HMCL";
     public static final String EULA_URL = "https://hmcl.huangyuhui.net/eula";
 
-    public static final String BUILD_CHANNEL = JarUtils.thisJar().flatMap(JarUtils::getManifest).map(manifest -> manifest.getMainAttributes().getValue("Build-Channel")).orElse("nightly");
+    public static final String BUILD_CHANNEL = JarUtils.getManifestAttribute("Build-Channel", "nightly");
 
     public static final Path MINECRAFT_DIRECTORY = OperatingSystem.getWorkingDirectory("minecraft");
-    public static final Path HMCL_DIRECTORY = getHMCLDirectory();
-
-    private static Path getHMCLDirectory() {
-        String home = System.getProperty("user.home", ".");
-        if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
-            // to fulfill XDG standard.
-            String xdgCache = System.getenv("XDG_CACHE_HOME");
-            if (StringUtils.isNotBlank(xdgCache)) {
-                return Paths.get(xdgCache, "hmcl");
-            }
-            return Paths.get(home, ".cache", "hmcl");
-        }
-        return OperatingSystem.getWorkingDirectory("hmcl");
-    }
+    public static final Path HMCL_DIRECTORY = OperatingSystem.getWorkingDirectory("hmcl");
 
     public static boolean isStable() {
         return "stable".equals(BUILD_CHANNEL);
