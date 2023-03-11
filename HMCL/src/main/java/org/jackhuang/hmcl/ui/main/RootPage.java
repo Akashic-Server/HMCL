@@ -50,6 +50,7 @@ import java.io.File;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import static org.jackhuang.hmcl.ui.FXUtils.runInFX;
@@ -156,7 +157,7 @@ public class RootPage extends DecoratorAnimatedPage implements DecoratorPage {
             multiplayerItem.setActionButtonVisible(false);
             multiplayerItem.setTitle(i18n("multiplayer"));
             JFXHyperlink link = new JFXHyperlink(i18n("multiplayer.hint.details"));
-            link.setOnAction(e -> FXUtils.openLink("https://hmcl.huangyuhui.net/api/redirect/multiplayer-migrate"));
+            link.setExternalLink("https://hmcl.huangyuhui.net/api/redirect/multiplayer-migrate");
             multiplayerItem.setOnAction(e -> Controllers.dialog(
                     new MessageDialogPane.Builder(i18n("multiplayer.hint"), null, MessageDialogPane.MessageType.INFO)
                             .addAction(link)
@@ -172,13 +173,13 @@ public class RootPage extends DecoratorAnimatedPage implements DecoratorPage {
 
             // the left sidebar
             AdvancedListBox sideBar = new AdvancedListBox()
-                    .startCategory(i18n("account").toUpperCase())
+                    .startCategory(i18n("account").toUpperCase(Locale.ROOT))
                     .add(accountListItem)
-                    .startCategory(i18n("version").toUpperCase())
+                    .startCategory(i18n("version").toUpperCase(Locale.ROOT))
                     .add(gameListItem)
                     .add(gameItem)
                     .add(downloadItem)
-                    .startCategory(i18n("settings.launcher.general").toUpperCase())
+                    .startCategory(i18n("settings.launcher.general").toUpperCase(Locale.ROOT))
                     .add(multiplayerItem)
                     .add(launcherSettingsItem);
 

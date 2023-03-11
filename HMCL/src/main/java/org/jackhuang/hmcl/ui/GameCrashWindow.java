@@ -28,6 +28,7 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -38,6 +39,7 @@ import org.jackhuang.hmcl.Metadata;
 import org.jackhuang.hmcl.download.LibraryAnalyzer;
 import org.jackhuang.hmcl.game.*;
 import org.jackhuang.hmcl.launch.ProcessListener;
+import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.ui.construct.TwoLineListItem;
 import org.jackhuang.hmcl.util.Lang;
@@ -107,7 +109,7 @@ public class GameCrashWindow extends Stage {
         this.feedbackTextFlow.getChildren().addAll(FXUtils.parseSegment(i18n("game.crash.feedback"), Controllers::onHyperlinkAction));
 
         setScene(new Scene(view, 800, 480));
-        getScene().getStylesheets().addAll(config().getTheme().getStylesheets(config().getLauncherFontFamily()));
+        getScene().getStylesheets().addAll(Theme.getTheme().getStylesheets(config().getLauncherFontFamily()));
         setTitle(i18n("game.crash.title"));
         getIcons().add(newImage("/assets/img/icon.png"));
 
@@ -346,21 +348,28 @@ public class GameCrashWindow extends Stage {
                 Label reasonTitle = new Label(i18n("game.crash.reason"));
                 reasonTitle.getStyleClass().add("two-line-item-second-large-title");
 
+                ScrollPane reasonPane = new ScrollPane(reasonTextFlow);
+                reasonPane.setFitToWidth(true);
+                reasonPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+                reasonPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+
                 gameDirPane.setPadding(new Insets(8));
                 VBox.setVgrow(gameDirPane, Priority.ALWAYS);
-                gameDirPane.getChildren().setAll(gameDir, javaDir, new VBox(reasonTitle, reasonTextFlow, feedbackTextFlow));
+                FXUtils.onChangeAndOperate(feedbackTextFlow.visibleProperty(), visible -> {
+                    if (visible) {
+                        gameDirPane.getChildren().setAll(gameDir, javaDir, new VBox(reasonTitle, reasonPane, feedbackTextFlow));
+                    } else {
+                        gameDirPane.getChildren().setAll(gameDir, javaDir, new VBox(reasonTitle, reasonPane));
+                    }
+                });
             }
 
             HBox toolBar = new HBox();
             {
-                JFXButton exportGameCrashInfoButton = new JFXButton(i18n("logwindow.export_game_crash_logs"));
-                exportGameCrashInfoButton.setButtonType(JFXButton.ButtonType.RAISED);
-                exportGameCrashInfoButton.getStyleClass().add("jfx-button-raised");
+                JFXButton exportGameCrashInfoButton = FXUtils.newRaisedButton(i18n("logwindow.export_game_crash_logs"));
                 exportGameCrashInfoButton.setOnMouseClicked(e -> exportGameCrashInfo());
 
-                JFXButton logButton = new JFXButton(i18n("logwindow.title"));
-                logButton.setButtonType(JFXButton.ButtonType.RAISED);
-                logButton.getStyleClass().add("jfx-button-raised");
+                JFXButton logButton = FXUtils.newRaisedButton(i18n("logwindow.title"));
                 logButton.setOnMouseClicked(e -> showLogWindow());
 
                 toolBar.setPadding(new Insets(8));

@@ -105,15 +105,7 @@ public class DefaultLauncher extends Launcher {
 
         res.add(options.getJava().getBinary().toString());
 
-        // Fix RCE vulnerability of log4j2
-        res.addDefault("-Djava.rmi.server.useCodebaseOnly=", "true");
-        res.addDefault("-Dcom.sun.jndi.rmi.object.trustURLCodebase=", "false");
-        res.addDefault("-Dcom.sun.jndi.cosnaming.object.trustURLCodebase=", "false");
-
-        String formatMsgNoLookups = res.addDefault("-Dlog4j2.formatMsgNoLookups=", "true");
-        if (!"-Dlog4j2.formatMsgNoLookups=false".equals(formatMsgNoLookups) && isUsingLog4j()) {
-            res.addDefault("-Dlog4j.configurationFile=", getLog4jConfigurationFile().getAbsolutePath());
-        }
+        res.addAllWithoutParsing(options.getOverrideJavaArguments());
 
         Proxy proxy = options.getProxy();
         if (proxy != null && StringUtils.isBlank(options.getProxyUser()) && StringUtils.isBlank(options.getProxyPass())) {
@@ -136,7 +128,8 @@ public class DefaultLauncher extends Launcher {
         if (options.getMaxMemory() != null && options.getMaxMemory() > 0)
             res.addDefault("-Xmx", options.getMaxMemory() + "m");
 
-        if (options.getMinMemory() != null && options.getMinMemory() > 0)
+        if (options.getMinMemory() != null && options.getMinMemory() > 0
+                && (options.getMaxMemory() == null || options.getMinMemory() <= options.getMaxMemory()))
             res.addDefault("-Xms", options.getMinMemory() + "m");
 
         if (options.getMetaspace() != null && options.getMetaspace() > 0)
@@ -159,6 +152,16 @@ public class DefaultLauncher extends Launcher {
         res.addDefault("-Dsun.stdout.encoding=", encoding.name());
         res.addDefault("-Dsun.stderr.encoding=", encoding.name());
 
+        // Fix RCE vulnerability of log4j2
+        res.addDefault("-Djava.rmi.server.useCodebaseOnly=", "true");
+        res.addDefault("-Dcom.sun.jndi.rmi.object.trustURLCodebase=", "false");
+        res.addDefault("-Dcom.sun.jndi.cosnaming.object.trustURLCodebase=", "false");
+
+        String formatMsgNoLookups = res.addDefault("-Dlog4j2.formatMsgNoLookups=", "true");
+        if (!"-Dlog4j2.formatMsgNoLookups=false".equals(formatMsgNoLookups) && isUsingLog4j()) {
+            res.addDefault("-Dlog4j.configurationFile=", getLog4jConfigurationFile().getAbsolutePath());
+        }
+
         // Default JVM Args
         if (!options.isNoGeneratedJVMArgs()) {
             appendJvmArgs(res);
@@ -177,22 +180,14 @@ public class DefaultLauncher extends Launcher {
                 res.addDefault("-Duser.home=", options.getGameDir().getParent());
 
             // Using G1GC with its settings by default
-            if (options.getJava().getParsedVersion() >= JavaVersion.JAVA_8) {
-                boolean addG1Args = true;
-                for (String javaArg : options.getJavaArguments()) {
-                    if ("-XX:-UseG1GC".equals(javaArg) || (javaArg.startsWith("-XX:+Use") && javaArg.endsWith("GC"))) {
-                        addG1Args = false;
-                        break;
-                    }
-                }
-                if (addG1Args) {
-                    res.addUnstableDefault("UnlockExperimentalVMOptions", true);
-                    res.addUnstableDefault("UseG1GC", true);
-                    res.addUnstableDefault("G1NewSizePercent", "20");
-                    res.addUnstableDefault("G1ReservePercent", "20");
-                    res.addUnstableDefault("MaxGCPauseMillis", "50");
-                    res.addUnstableDefault("G1HeapRegionSize", "32m");
-                }
+            if (options.getJava().getParsedVersion() >= JavaVersion.JAVA_8
+                    && res.noneMatch(arg -> "-XX:-UseG1GC".equals(arg) || (arg.startsWith("-XX:+Use") && arg.endsWith("GC")))) {
+                res.addUnstableDefault("UnlockExperimentalVMOptions", true);
+                res.addUnstableDefault("UseG1GC", true);
+                res.addUnstableDefault("G1NewSizePercent", "20");
+                res.addUnstableDefault("G1ReservePercent", "20");
+                res.addUnstableDefault("MaxGCPauseMillis", "50");
+                res.addUnstableDefault("G1HeapRegionSize", "32m");
             }
 
             res.addUnstableDefault("UseAdaptiveSizePolicy", false);
@@ -467,16 +462,29 @@ public class DefaultLauncher extends Launcher {
 
     private Map<String, String> getEnvVars() {
         String versionName = Optional.ofNullable(options.getVersionName()).orElse(version.getId());
-        Map<String, String> env = new HashMap<>();
+        Map<String, String> env = new LinkedHashMap<>();
         env.put("INST_NAME", versionName);
         env.put("INST_ID", versionName);
         env.put("INST_DIR", repository.getVersionRoot(version.getId()).getAbsolutePath());
         env.put("INST_MC_DIR", repository.getRunDirectory(version.getId()).getAbsolutePath());
         env.put("INST_JAVA", options.getJava().getBinary().toString());
 
-        if (options.isUseSoftwareRenderer() && OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
-            env.put("LIBGL_ALWAYS_SOFTWARE", "1");
-            env.put("__GLX_VENDOR_LIBRARY_NAME", "mesa");
+        Renderer renderer = options.getRenderer();
+        if (renderer != Renderer.DEFAULT) {
+            if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS) {
+                if (renderer != Renderer.LLVMPIPE)
+                    env.put("GALLIUM_DRIVER", renderer.name().toLowerCase(Locale.ROOT));
+            } else if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
+                env.put("__GLX_VENDOR_LIBRARY_NAME", "mesa");
+                switch (renderer) {
+                    case LLVMPIPE:
+                        env.put("LIBGL_ALWAYS_SOFTWARE", "1");
+                        break;
+                    case ZINK:
+                        env.put("MESA_LOADER_DRIVER_OVERRIDE", "zink");
+                        break;
+                }
+            }
         }
 
         LibraryAnalyzer analyzer = LibraryAnalyzer.analyze(version);
@@ -492,6 +500,12 @@ public class DefaultLauncher extends Launcher {
         if (analyzer.has(LibraryAnalyzer.LibraryType.OPTIFINE)) {
             env.put("INST_OPTIFINE", "1");
         }
+        if (analyzer.has(LibraryAnalyzer.LibraryType.QUILT)) {
+            env.put("INST_QUILT", "1");
+        }
+
+        env.putAll(options.getEnvironmentVariables());
+
         return env;
     }
 

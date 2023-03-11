@@ -25,6 +25,7 @@ import org.jackhuang.hmcl.Metadata;
 import org.jackhuang.hmcl.download.LibraryAnalyzer;
 import org.jackhuang.hmcl.event.Event;
 import org.jackhuang.hmcl.event.EventManager;
+import org.jackhuang.hmcl.mod.ModAdviser;
 import org.jackhuang.hmcl.mod.Modpack;
 import org.jackhuang.hmcl.mod.ModpackConfiguration;
 import org.jackhuang.hmcl.mod.ModpackProvider;
@@ -47,11 +48,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.jackhuang.hmcl.setting.ConfigHolder.config;
 import static org.jackhuang.hmcl.ui.FXUtils.newImage;
 import static org.jackhuang.hmcl.util.Logging.LOG;
+import static org.jackhuang.hmcl.util.Pair.pair;
 
 public class HMCLGameRepository extends DefaultGameRepository {
     private final Profile profile;
@@ -172,17 +175,7 @@ public class HMCLGameRepository extends DefaultGameRepository {
         File srcGameDir = getRunDirectory(srcId);
         File dstGameDir = getRunDirectory(dstId);
 
-        List<String> blackList = new ArrayList<>(Arrays.asList(
-                "regex:(.*?)\\.log",
-                "usernamecache.json", "usercache.json", // Minecraft
-                "launcher_profiles.json", "launcher.pack.lzma", // Minecraft Launcher
-                "backup", "pack.json", "launcher.jar", "cache", // HMCL
-                ".curseclient", // Curse
-                ".fabric", ".mixin.out", // Fabric
-                "jars", "logs", "versions", "assets", "libraries", "crash-reports", "NVIDIA", "AMD", "screenshots", "natives", "native", "$native", "server-resource-packs", // Minecraft
-                "downloads", // Curse
-                "asm", "backups", "TCNodeTracker", "CustomDISkins", "data", "CustomSkinLoader/caches" // Mods
-        ));
+        List<String> blackList = new ArrayList<>(ModAdviser.MODPACK_BLACK_LIST);
         blackList.add(srcId + ".jar");
         blackList.add(srcId + ".json");
         if (!copySaves)
@@ -336,7 +329,7 @@ public class HMCLGameRepository extends DefaultGameRepository {
                 .setVersionName(version)
                 .setProfileName(Metadata.TITLE)
                 .setGameArguments(StringUtils.tokenize(vs.getMinecraftArgs()))
-                .setJavaArguments(StringUtils.tokenize(vs.getJavaArgs()))
+                .setOverrideJavaArguments(StringUtils.tokenize(vs.getJavaArgs()))
                 .setMaxMemory(vs.isNoJVMArgs() && vs.isAutoMemory() ? null : (int)(getAllocatedMemory(
                         vs.getMaxMemory() * 1024L * 1024L,
                         OperatingSystem.getPhysicalMemoryStatus().orElse(OperatingSystem.PhysicalMemoryStatus.INVALID).getAvailable(),
@@ -344,6 +337,16 @@ public class HMCLGameRepository extends DefaultGameRepository {
                 ) / 1024 / 1024))
                 .setMinMemory(vs.getMinMemory())
                 .setMetaspace(Lang.toIntOrNull(vs.getPermSize()))
+                .setEnvironmentVariables(
+                        Lang.mapOf(StringUtils.tokenize(vs.getEnvironmentVariables())
+                                .stream()
+                                .map(it -> {
+                                    int idx = it.indexOf('=');
+                                    return idx >= 0 ? pair(it.substring(0, idx), it.substring(idx + 1)) : pair(it, "");
+                                })
+                                .collect(Collectors.toList())
+                        )
+                )
                 .setWidth(vs.getWidth())
                 .setHeight(vs.getHeight())
                 .setFullscreen(vs.isFullscreen())
@@ -355,7 +358,7 @@ public class HMCLGameRepository extends DefaultGameRepository {
                 .setNativesDirType(vs.getNativesDirType())
                 .setNativesDir(vs.getNativesDir())
                 .setProcessPriority(vs.getProcessPriority())
-                .setUseSoftwareRenderer(vs.isUseSoftwareRenderer())
+                .setRenderer(vs.getRenderer())
                 .setUseNativeGLFW(vs.isUseNativeGLFW())
                 .setUseNativeOpenAL(vs.isUseNativeOpenAL())
                 .setDaemon(!makeLaunchScript && vs.getLauncherVisibility().isDaemon())
@@ -429,7 +432,7 @@ public class HMCLGameRepository extends DefaultGameRepository {
             return false;
 
         if (OperatingSystem.CURRENT_OS == OperatingSystem.WINDOWS &&
-                FORBIDDEN_VERSION_IDS.contains(id.toLowerCase()))
+                FORBIDDEN_VERSION_IDS.contains(id.toLowerCase(Locale.ROOT)))
             return false;
 
         return OperatingSystem.isNameValid(id);
