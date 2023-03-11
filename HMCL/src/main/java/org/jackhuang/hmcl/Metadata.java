@@ -31,7 +31,7 @@ public final class Metadata {
     private Metadata() {}
 
     public static final String NAME = "Akashic Launcher";
-    public static final String FULL_NAME = "Hello Minecraft! Launcher Akashic Server Version";
+    public static final String FULL_NAME = "Hello Minecraft! Launcher Akashic MC Version";
     public static final String VERSION = System.getProperty("hmcl.version.override", JarUtils.getManifestAttribute("Implementation-Version", "@develop@"));
 
     public static final String TITLE = NAME + " " + VERSION;
