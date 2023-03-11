@@ -36,6 +36,9 @@ jobs:
 
     - name: Build with Gradle
       run: ./gradlew clean build
+      env:
+        MICROSOFT_AUTH_ID: ${{ secrets.MICROSOFT_AUTH_ID }}
+        MICROSOFT_AUTH_SECRET: ${{ secrets.MICROSOFT_AUTH_SECRET }}
 
     - uses: actions/upload-artifact@v2
       with:
