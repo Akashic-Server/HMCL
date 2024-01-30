@@ -37,9 +37,10 @@ public final class Metadata {
     public static final String TITLE = NAME + " " + VERSION;
     public static final String FULL_TITLE = FULL_NAME + " v" + VERSION;
 
-    public static final String UPDATE_URL = System.getProperty("hmcl.update_source.override", "https://hmcl.akashic.cc/api/update_link");
+    public static final String HMCL_UPDATE_URL = System.getProperty("hmcl.update_source.override", "https://hmcl.akashic.cc/api/update_link");
+    public static final String RESOURCE_UPDATE_URL = System.getProperty("hmcl.resource_update_source.override", "https://hmcl.akashic.cc/api/dynamic_remote_resource/update_link");
     public static final String CONTACT_URL = "https://github.com/Akashic-Server/HMCL/issues";
-    public static final String HELP_URL = "https://hmcl.huangyuhui.net/help";
+    public static final String HELP_URL = "https://github.com/Akashic-Server/HMCL";
     public static final String CHANGELOG_URL = "https://github.com/Akashic-Server/HMCL";
     public static final String PUBLISH_URL = "https://github.com/Akashic-Server/HMCL";
     public static final String EULA_URL = "https://docs.hmcl.net/eula/hmcl.html";
@@ -53,7 +54,7 @@ public final class Metadata {
     static {
         String hmclHome = System.getProperty("hmcl.home");
         if (hmclHome == null) {
-            if (OperatingSystem.CURRENT_OS == OperatingSystem.LINUX) {
+            if (OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
                 String xdgData = System.getenv("XDG_DATA_HOME");
                 if (StringUtils.isNotBlank(xdgData)) {
                     HMCL_DIRECTORY = Paths.get(xdgData, "hmcl").toAbsolutePath();
