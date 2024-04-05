@@ -37,7 +37,6 @@ import javafx.scene.control.Skin;
 import javafx.scene.control.SkinBase;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
-import org.jackhuang.hmcl.game.GameVersion;
 import org.jackhuang.hmcl.game.Version;
 import org.jackhuang.hmcl.mod.RemoteMod;
 import org.jackhuang.hmcl.mod.RemoteModRepository;
@@ -57,8 +56,8 @@ import org.jackhuang.hmcl.util.Lang;
 import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.i18n.I18n;
 import org.jackhuang.hmcl.util.javafx.BindingMapping;
+import org.jackhuang.hmcl.util.versioning.GameVersionNumber;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -163,24 +162,23 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
         retrySearch = null;
         setLoading(true);
         setFailed(false);
-        File versionJar = StringUtils.isNotBlank(version.get().getVersion())
-                ? version.get().getProfile().getRepository().getVersionJar(version.get().getVersion())
-                : null;
+
         if (executor != null && !executor.isCancelled()) {
             executor.cancel();
         }
 
         executor = Task.supplyAsync(() -> {
-            String gameVersion;
-            if (StringUtils.isBlank(version.get().getVersion())) {
-                gameVersion = userGameVersion;
+            Profile.ProfileVersion version = this.version.get();
+            if (StringUtils.isBlank(version.getVersion())) {
+                return userGameVersion;
             } else {
-                gameVersion = GameVersion.minecraftVersion(versionJar).orElse("");
+                return StringUtils.isNotBlank(version.getVersion())
+                        ? version.getProfile().getRepository().getGameVersion(version.getVersion()).orElse("")
+                        : "";
             }
-            return gameVersion;
-        }).thenApplyAsync(gameVersion -> {
-            return repository.search(gameVersion, category, pageOffset, 50, searchFilter, sort, RemoteModRepository.SortOrder.DESC);
-        }).whenComplete(Schedulers.javafx(), (result, exception) -> {
+        }).thenApplyAsync(gameVersion ->
+                repository.search(gameVersion, category, pageOffset, 50, searchFilter, sort, RemoteModRepository.SortOrder.DESC)
+        ).whenComplete(Schedulers.javafx(), (result, exception) -> {
             setLoading(false);
             if (exception == null) {
                 items.setAll(result.getResults().collect(Collectors.toList()));
@@ -295,7 +293,7 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                 JFXComboBox<String> gameVersionField = new JFXComboBox<>();
                 gameVersionField.setMaxWidth(Double.MAX_VALUE);
                 gameVersionField.setEditable(true);
-                gameVersionField.getItems().setAll(RemoteModRepository.DEFAULT_GAME_VERSIONS);
+                gameVersionField.getItems().setAll(GameVersionNumber.getDefaultGameVersions());
                 Label lblGameVersion = new Label(i18n("world.game_version"));
                 searchPane.addRow(rowIndex++, new Label(i18n("mods.name")), nameField, lblGameVersion, gameVersionField);
 
@@ -415,7 +413,7 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                         searchAction.handle(event);
                     });
                     lastPageButton.setDisable(true);
-                    control.pageCount.addListener((observable, oldValue, newValue) -> lastPageButton.setDisable(control.pageCount.get() == -1));
+                    control.pageCount.addListener((observable, oldValue, newValue) -> lastPageButton.setDisable(control.pageCount.get() == -1 || control.pageOffset.get() >= control.pageCount.get() - 1));
 
                     Pane placeholder = new Pane();
                     HBox.setHgrow(placeholder, Priority.SOMETIMES);
@@ -479,7 +477,7 @@ public class DownloadListPage extends Control implements DecoratorPage, VersionP
                     protected void updateControl(RemoteMod dataItem, boolean empty) {
                         if (empty) return;
                         ModTranslations.Mod mod = ModTranslations.getTranslationsByRepositoryType(getSkinnable().repository.getType()).getModByCurseForgeId(dataItem.getSlug());
-                        content.setTitle(mod != null && I18n.getCurrentLocale().getLocale() == Locale.CHINA ? mod.getDisplayName() : dataItem.getTitle());
+                        content.setTitle(mod != null && I18n.isUseChinese() ? mod.getDisplayName() : dataItem.getTitle());
                         content.setSubtitle(dataItem.getDescription());
                         content.getTags().setAll(dataItem.getCategories().stream()
                                 .map(category -> getSkinnable().getLocalizedCategory(category))
