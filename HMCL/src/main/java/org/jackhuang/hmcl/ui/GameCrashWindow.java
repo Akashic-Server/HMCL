@@ -142,7 +142,7 @@ public class GameCrashWindow extends Stage {
 
             String log;
             try {
-                log = FileUtils.readText(latestLog);
+                log = FileUtils.readTextMaybeNativeEncoding(latestLog);
             } catch (IOException e) {
                 LOG.warning("Failed to read logs/latest.log", e);
                 return pair(new HashSet<CrashReportAnalyzer.Result>(), new HashSet<String>());
@@ -400,7 +400,7 @@ public class GameCrashWindow extends Stage {
                 ScrollPane reasonPane = new ScrollPane(reasonTextFlow);
                 reasonPane.setFitToWidth(true);
                 reasonPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-                reasonPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+                reasonPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
 
                 gameDirPane.setPadding(new Insets(8));
                 VBox.setVgrow(gameDirPane, Priority.ALWAYS);
@@ -422,7 +422,7 @@ public class GameCrashWindow extends Stage {
                 logButton.setOnAction(e -> showLogWindow());
 
                 JFXButton helpButton = FXUtils.newRaisedButton(i18n("help"));
-                helpButton.setOnAction(e -> FXUtils.openLink("https://docs.hmcl.net/help.html"));
+                helpButton.setOnAction(e -> FXUtils.openLink(Metadata.CONTACT_URL));
                 FXUtils.installFastTooltip(helpButton, i18n("logwindow.help"));
 
 

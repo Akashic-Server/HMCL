@@ -28,7 +28,8 @@ import java.nio.file.Paths;
  * Stores metadata about this application.
  */
 public final class Metadata {
-    private Metadata() {}
+    private Metadata() {
+    }
 
     public static final String NAME = "Akashic Launcher";
     public static final String FULL_NAME = "Hello Minecraft! Launcher Akashic MC Version";
@@ -37,19 +38,25 @@ public final class Metadata {
     public static final String TITLE = NAME + " " + VERSION;
     public static final String FULL_TITLE = FULL_NAME + " v" + VERSION;
 
-    public static final String HMCL_UPDATE_URL = System.getProperty("hmcl.update_source.override", "https://hmcl.akashic.cc/api/update_link");
-    public static final String RESOURCE_UPDATE_URL = System.getProperty("hmcl.resource_update_source.override", "https://hmcl.akashic.cc/api/dynamic_remote_resource/update_link");
-    public static final String CONTACT_URL = "https://github.com/Akashic-Server/HMCL/issues";
-    public static final String HELP_URL = "https://github.com/Akashic-Server/HMCL";
-    public static final String CHANGELOG_URL = "https://github.com/Akashic-Server/HMCL";
-    public static final String PUBLISH_URL = "https://github.com/Akashic-Server/HMCL";
-    public static final String EULA_URL = "https://docs.hmcl.net/eula/hmcl.html";
+    public static final String PUBLISH_URL = "https://hmcl.akashic.cc";
+    public static final String ABOUT_URL = PUBLISH_URL + "/about";
+    public static final String DOWNLOAD_URL = PUBLISH_URL + "/download";
+    public static final String HMCL_UPDATE_URL = System.getProperty("hmcl.update_source.override", PUBLISH_URL + "/api/update_link");
+
+    public static final String DOCS_URL = "https://docs.hmcl.akashic.cc";
+    public static final String CONTACT_URL = DOCS_URL + "/help.html";
+    public static final String CHANGELOG_URL = DOCS_URL + "/changelog/";
+    public static final String EULA_URL = DOCS_URL + "/eula/hmcl.html";
+    public static final String GROUPS_URL = DOCS_URL + "/groups.html";
 
     public static final String BUILD_CHANNEL = JarUtils.getManifestAttribute("Build-Channel", "nightly");
     public static final String GITHUB_SHA = JarUtils.getManifestAttribute("GitHub-SHA", null);
 
+    public static final Path CURRENT_DIRECTORY = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
     public static final Path MINECRAFT_DIRECTORY = OperatingSystem.getWorkingDirectory("minecraft");
-    public static final Path HMCL_DIRECTORY;
+    public static final Path HMCL_GLOBAL_DIRECTORY;
+    public static final Path HMCL_CURRENT_DIRECTORY;
+    public static final Path DEPENDENCIES_DIRECTORY;
 
     static {
         String hmclHome = System.getProperty("hmcl.home");
@@ -57,16 +64,22 @@ public final class Metadata {
             if (OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
                 String xdgData = System.getenv("XDG_DATA_HOME");
                 if (StringUtils.isNotBlank(xdgData)) {
-                    HMCL_DIRECTORY = Paths.get(xdgData, "hmcl").toAbsolutePath();
+                    HMCL_GLOBAL_DIRECTORY = Paths.get(xdgData, "hmcl").toAbsolutePath().normalize();
                 } else {
-                    HMCL_DIRECTORY = Paths.get(System.getProperty("user.home", "."), ".local", "share", "hmcl").toAbsolutePath();
+                    HMCL_GLOBAL_DIRECTORY = Paths.get(System.getProperty("user.home"), ".local", "share", "hmcl").toAbsolutePath().normalize();
                 }
             } else {
-                HMCL_DIRECTORY = OperatingSystem.getWorkingDirectory("hmcl");
+                HMCL_GLOBAL_DIRECTORY = OperatingSystem.getWorkingDirectory("hmcl");
             }
         } else {
-            HMCL_DIRECTORY = Paths.get(hmclHome).toAbsolutePath().normalize();
+            HMCL_GLOBAL_DIRECTORY = Paths.get(hmclHome).toAbsolutePath().normalize();
         }
+
+        String hmclCurrentDir = System.getProperty("hmcl.dir");
+        HMCL_CURRENT_DIRECTORY = hmclCurrentDir != null
+                ? Paths.get(hmclCurrentDir).toAbsolutePath().normalize()
+                : CURRENT_DIRECTORY.resolve(".hmcl");
+        DEPENDENCIES_DIRECTORY = HMCL_CURRENT_DIRECTORY.resolve("dependencies");
     }
 
     public static boolean isStable() {

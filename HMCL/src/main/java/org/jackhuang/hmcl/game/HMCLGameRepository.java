@@ -38,7 +38,6 @@ import org.jackhuang.hmcl.util.Lang;
 import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.gson.JsonUtils;
 import org.jackhuang.hmcl.util.io.FileUtils;
-import org.jackhuang.hmcl.util.javafx.PropertyUtils;
 import org.jackhuang.hmcl.java.JavaRuntime;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
 import org.jackhuang.hmcl.util.versioning.VersionNumber;
@@ -359,12 +358,9 @@ public class HMCLGameRepository extends DefaultGameRepository {
             vs = createLocalVersionSetting(id);
         if (vs == null)
             return null;
-        VersionIconType versionIcon = vs.getVersionIcon();
         if (vs.isUsesGlobal()) {
-            PropertyUtils.copyProperties(profile.getGlobal(), vs);
             vs.setUsesGlobal(false);
         }
-        vs.setVersionIcon(versionIcon); // versionIcon is preserved
         return vs;
     }
 
@@ -374,7 +370,7 @@ public class HMCLGameRepository extends DefaultGameRepository {
             vs.setUsesGlobal(true);
     }
 
-    public LaunchOptions getLaunchOptions(String version, JavaRuntime javaVersion, File gameDir, List<String> javaAgents, boolean makeLaunchScript) {
+    public LaunchOptions getLaunchOptions(String version, JavaRuntime javaVersion, File gameDir, List<String> javaAgents, List<String> javaArguments, boolean makeLaunchScript) {
         VersionSetting vs = getVersionSetting(version);
 
         LaunchOptions.Builder builder = new LaunchOptions.Builder()
@@ -417,7 +413,8 @@ public class HMCLGameRepository extends DefaultGameRepository {
                 .setUseNativeGLFW(vs.isUseNativeGLFW())
                 .setUseNativeOpenAL(vs.isUseNativeOpenAL())
                 .setDaemon(!makeLaunchScript && vs.getLauncherVisibility().isDaemon())
-                .setJavaAgents(javaAgents);
+                .setJavaAgents(javaAgents)
+                .setJavaArguments(javaArguments);
         if (config().hasProxy()) {
             builder.setProxy(ProxyManager.getProxy());
             if (config().hasProxyAuth()) {
@@ -512,16 +509,16 @@ public class HMCLGameRepository extends DefaultGameRepository {
 
     public static long getAllocatedMemory(long minimum, long available, boolean auto) {
         if (auto) {
-            available -= 384 * 1024 * 1024; // Reserve 384MiB memory for off-heap memory and HMCL itself
+            available -= 512 * 1024 * 1024; // Reserve 512 MiB memory for off-heap memory and HMCL itself
             if (available <= 0) {
                 return minimum;
             }
 
-            final long threshold = 8L * 1024 * 1024 * 1024;
+            final long threshold = 8L * 1024 * 1024 * 1024; // 8 GiB
             final long suggested = Math.min(available <= threshold
                             ? (long) (available * 0.8)
                             : (long) (threshold * 0.8 + (available - threshold) * 0.2),
-                    16384L * 1024 * 1024);
+                    16L * 1024 * 1024 * 1024);
             return Math.max(minimum, suggested);
         } else {
             return minimum;

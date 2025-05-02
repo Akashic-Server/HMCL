@@ -1,13 +1,3 @@
-buildscript {
-    repositories {
-        mavenCentral()
-    }
-
-    dependencies {
-        classpath("com.google.code.gson:gson:2.11.0")
-    }
-}
-
 val jfxVersion = "17.0.13"
 val oldJfxVersion = "19.0.2.1"
 
@@ -86,7 +76,7 @@ if (!jfxInClasspath && JavaVersion.current() >= JavaVersion.VERSION_11) {
     }
 }
 
-rootProject.tasks.create("generateOpenJFXDependencies") {
+rootProject.tasks.register("generateOpenJFXDependencies") {
     doLast {
         val jfxDependencies = jfxPlatforms.associate { platform ->
             platform.name to jfxModules.map { module ->
@@ -109,7 +99,7 @@ rootProject.tasks.create("generateOpenJFXDependencies") {
 }
 
 // Ensure that the mirror repository caches files
-rootProject.tasks.create("preTouchOpenJFXDependencies") {
+rootProject.tasks.register("preTouchOpenJFXDependencies") {
     doLast {
         for (repo in jfxMirrorRepos) {
             for (platform in jfxPlatforms) {
