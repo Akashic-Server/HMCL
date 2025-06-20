@@ -27,6 +27,7 @@ import javafx.scene.input.DataFormat;
 import javafx.stage.Stage;
 import org.jackhuang.hmcl.setting.ConfigHolder;
 import org.jackhuang.hmcl.setting.SambaException;
+import org.jackhuang.hmcl.util.FileSaver;
 import org.jackhuang.hmcl.task.AsyncTaskExecutor;
 import org.jackhuang.hmcl.task.Schedulers;
 import org.jackhuang.hmcl.ui.Controllers;
@@ -38,11 +39,14 @@ import org.jackhuang.hmcl.util.StringUtils;
 import org.jackhuang.hmcl.util.io.JarUtils;
 import org.jackhuang.hmcl.util.platform.Architecture;
 import org.jackhuang.hmcl.util.platform.CommandBuilder;
+import org.jackhuang.hmcl.util.platform.NativeUtils;
 import org.jackhuang.hmcl.util.platform.OperatingSystem;
+import org.jackhuang.hmcl.util.platform.SystemInfo;
 
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryPoolMXBean;
 import java.net.CookieHandler;
 import java.net.CookieManager;
 import java.nio.file.Files;
@@ -53,6 +57,7 @@ import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static org.jackhuang.hmcl.ui.FXUtils.runInFX;
+import static org.jackhuang.hmcl.util.DataSizeUnit.MEGABYTES;
 import static org.jackhuang.hmcl.util.logging.Logger.LOG;
 import static org.jackhuang.hmcl.util.i18n.I18n.i18n;
 
@@ -86,7 +91,7 @@ public final class Launcher extends Application {
             }
 
             // https://lapcatsoftware.com/articles/app-translocation.html
-            if (OperatingSystem.CURRENT_OS == OperatingSystem.OSX
+            if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS
                     && ConfigHolder.isNewlyCreated()
                     && System.getProperty("user.dir").startsWith("/private/var/folders/")) {
                 if (showAlert(AlertType.WARNING, i18n("fatal.mac_app_translocation"), ButtonType.YES, ButtonType.NO) == ButtonType.NO)
@@ -148,7 +153,7 @@ public final class Launcher extends Application {
                     || configPath.startsWith("/var/cache/")
                     || configPath.startsWith("/dev/shm/")
                     || configPath.contains("/Trash/");
-        } else if (OperatingSystem.CURRENT_OS == OperatingSystem.OSX) {
+        } else if (OperatingSystem.CURRENT_OS == OperatingSystem.MACOS) {
             return configPath.startsWith("/var/folders/")
                     || configPath.startsWith("/private/var/folders/")
                     || configPath.startsWith("/tmp/")
@@ -210,6 +215,7 @@ public final class Launcher extends Application {
     @Override
     public void stop() throws Exception {
         Controllers.onApplicationStop();
+        FileSaver.shutdown();
         LOG.shutdown();
     }
 
@@ -245,17 +251,25 @@ public final class Launcher extends Application {
             LOG.info("HMCL Current Directory: " + Metadata.HMCL_CURRENT_DIRECTORY);
             LOG.info("HMCL Jar Path: " + Lang.requireNonNullElse(JarUtils.thisJarPath(), "Not Found"));
             LOG.info("HMCL Log File: " + Lang.requireNonNullElse(LOG.getLogFile(), "In Memory"));
-            LOG.info("Memory: " + Runtime.getRuntime().maxMemory() / 1024 / 1024 + "MB");
-            LOG.info("Physical memory: " + OperatingSystem.TOTAL_MEMORY + " MB");
-            LOG.info("Metaspace: " + ManagementFactory.getMemoryPoolMXBeans().stream()
-                    .filter(bean -> bean.getName().equals("Metaspace"))
-                    .findAny()
-                    .map(bean -> bean.getUsage().getUsed() / 1024 / 1024 + "MB")
-                    .orElse("Unknown"));
+            LOG.info("JVM Max Memory: " + MEGABYTES.formatBytes(Runtime.getRuntime().maxMemory()));
+            try {
+                for (MemoryPoolMXBean bean : ManagementFactory.getMemoryPoolMXBeans()) {
+                    if ("Metaspace".equals(bean.getName())) {
+                        long bytes = bean.getUsage().getUsed();
+                        LOG.info("Metaspace: " + MEGABYTES.formatBytes(bytes));
+                        break;
+                    }
+                }
+            } catch (NoClassDefFoundError ignored) {
+            }
+            LOG.info("Native Backend: " + (NativeUtils.USE_JNA ? "JNA" : "None"));
             if (OperatingSystem.CURRENT_OS.isLinuxOrBSD()) {
                 LOG.info("XDG Session Type: " + System.getenv("XDG_SESSION_TYPE"));
                 LOG.info("XDG Current Desktop: " + System.getenv("XDG_CURRENT_DESKTOP"));
             }
+
+            Lang.thread(SystemInfo::initialize, "Detection System Information", true);
+
             launch(Launcher.class, args);
         } catch (Throwable e) { // Fucking JavaFX will suppress the exception and will break our crash reporter.
             CRASH_REPORTER.uncaughtException(Thread.currentThread(), e);
@@ -284,7 +298,7 @@ public final class Launcher extends Application {
             Controllers.getStage().close();
             Schedulers.shutdown();
             Controllers.shutdown();
-            Lang.executeDelayed(OperatingSystem::forceGC, TimeUnit.SECONDS, 5, true);
+            Lang.executeDelayed(System::gc, TimeUnit.SECONDS, 5, true);
         });
     }
 
