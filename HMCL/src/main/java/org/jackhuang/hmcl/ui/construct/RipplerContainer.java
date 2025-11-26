@@ -18,7 +18,6 @@
 package org.jackhuang.hmcl.ui.construct;
 
 import com.jfoenix.controls.JFXRippler;
-import javafx.animation.Interpolator;
 import javafx.animation.Transition;
 import javafx.beans.DefaultProperty;
 import javafx.beans.InvalidationListener;
@@ -40,6 +39,7 @@ import javafx.scene.paint.Paint;
 import javafx.scene.shape.Rectangle;
 import javafx.util.Duration;
 import org.jackhuang.hmcl.ui.animation.AnimationUtils;
+import org.jackhuang.hmcl.ui.animation.Motion;
 import org.jackhuang.hmcl.util.Lang;
 
 import java.util.List;
@@ -109,7 +109,7 @@ public class RipplerContainer extends StackPane {
             setOnMouseEntered(e -> new Transition() {
                 {
                     setCycleDuration(DURATION);
-                    setInterpolator(Interpolator.EASE_IN);
+                    setInterpolator(Motion.EASE_IN);
                 }
 
                 @Override
@@ -121,7 +121,7 @@ public class RipplerContainer extends StackPane {
             setOnMouseExited(e -> new Transition() {
                 {
                     setCycleDuration(DURATION);
-                    setInterpolator(Interpolator.EASE_OUT);
+                    setInterpolator(Motion.EASE_OUT);
                 }
 
                 @Override
@@ -191,7 +191,7 @@ public class RipplerContainer extends StackPane {
         return StyleableProperties.FACTORY.getCssMetaData();
     }
 
-    private static class StyleableProperties {
+    private final static class StyleableProperties {
         private static final StyleablePropertyFactory<RipplerContainer> FACTORY = new StyleablePropertyFactory<>(StackPane.getClassCssMetaData());
 
         private static final CssMetaData<RipplerContainer, Paint> RIPPLER_FILL = FACTORY.createPaintCssMetaData("-jfx-rippler-fill", s -> s.ripplerFill, Color.rgb(0, 200, 255));

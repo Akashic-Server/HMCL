@@ -18,8 +18,15 @@
 package org.jackhuang.hmcl.ui.decorator;
 
 import com.jfoenix.controls.JFXButton;
+import javafx.animation.Interpolator;
+import javafx.animation.KeyFrame;
+import javafx.animation.KeyValue;
+import javafx.animation.Timeline;
+import javafx.beans.InvalidationListener;
+import javafx.beans.WeakInvalidationListener;
 import javafx.beans.binding.Bindings;
 import javafx.collections.ListChangeListener;
+import javafx.event.EventHandler;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -29,26 +36,33 @@ import javafx.scene.control.Label;
 import javafx.scene.control.SkinBase;
 import javafx.scene.effect.BlurType;
 import javafx.scene.effect.DropShadow;
+import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.stage.Stage;
 
+import javafx.util.Duration;
 import org.jackhuang.hmcl.Metadata;
 import org.jackhuang.hmcl.setting.Theme;
 import org.jackhuang.hmcl.ui.FXUtils;
 import org.jackhuang.hmcl.ui.SVG;
-import org.jackhuang.hmcl.ui.animation.AnimationProducer;
 import org.jackhuang.hmcl.ui.animation.ContainerAnimations;
+import org.jackhuang.hmcl.ui.animation.Motion;
 import org.jackhuang.hmcl.ui.animation.TransitionPane;
 import org.jackhuang.hmcl.ui.wizard.Navigation;
+import org.jackhuang.hmcl.util.platform.OperatingSystem;
 
 public class DecoratorSkin extends SkinBase<Decorator> {
     private final StackPane root, parent;
     private final StackPane titleContainer;
     private final Stage primaryStage;
     private final TransitionPane navBarPane;
+
+    @SuppressWarnings("FieldCanBeLocal")
+    private final InvalidationListener onWindowsStatusChange;
+    private final EventHandler<MouseEvent> onTitleBarDoubleClick;
 
     private double mouseInitX, mouseInitY, stageInitX, stageInitY, stageInitWidth, stageInitHeight;
 
@@ -80,9 +94,41 @@ public class DecoratorSkin extends SkinBase<Decorator> {
 
         skinnable.getSnackbar().registerSnackbarContainer(parent);
 
-        root.addEventFilter(MouseEvent.MOUSE_RELEASED, this::onMouseReleased);
-        root.addEventFilter(MouseEvent.MOUSE_DRAGGED, this::onMouseDragged);
-        root.addEventFilter(MouseEvent.MOUSE_MOVED, this::onMouseMoved);
+        EventHandler<MouseEvent> onMouseReleased = this::onMouseReleased;
+        EventHandler<MouseEvent> onMouseDragged = this::onMouseDragged;
+        EventHandler<MouseEvent> onMouseMoved = this::onMouseMoved;
+
+        // https://github.com/HMCL-dev/HMCL/issues/4290
+        if (OperatingSystem.CURRENT_OS != OperatingSystem.MACOS) {
+            onWindowsStatusChange = observable -> {
+                if (primaryStage.isIconified() || primaryStage.isFullScreen() || primaryStage.isMaximized()) {
+                    root.removeEventFilter(MouseEvent.MOUSE_RELEASED, onMouseReleased);
+                    root.removeEventFilter(MouseEvent.MOUSE_DRAGGED, onMouseDragged);
+                    root.removeEventFilter(MouseEvent.MOUSE_MOVED, onMouseMoved);
+                } else {
+                    root.addEventFilter(MouseEvent.MOUSE_RELEASED, onMouseReleased);
+                    root.addEventFilter(MouseEvent.MOUSE_DRAGGED, onMouseDragged);
+                    root.addEventFilter(MouseEvent.MOUSE_MOVED, onMouseMoved);
+                }
+            };
+            onTitleBarDoubleClick = event -> {
+                if (event.getButton() == MouseButton.PRIMARY && event.getClickCount() == 2) {
+                    primaryStage.setMaximized(!primaryStage.isMaximized());
+                    event.consume();
+                }
+            };
+            WeakInvalidationListener weakOnWindowsStatusChange = new WeakInvalidationListener(onWindowsStatusChange);
+            primaryStage.iconifiedProperty().addListener(weakOnWindowsStatusChange);
+            primaryStage.maximizedProperty().addListener(weakOnWindowsStatusChange);
+            primaryStage.fullScreenProperty().addListener(weakOnWindowsStatusChange);
+            onWindowsStatusChange.invalidated(null);
+        } else {
+            onWindowsStatusChange = null;
+            onTitleBarDoubleClick = null;
+            root.addEventFilter(MouseEvent.MOUSE_RELEASED, onMouseReleased);
+            root.addEventFilter(MouseEvent.MOUSE_DRAGGED, onMouseDragged);
+            root.addEventFilter(MouseEvent.MOUSE_MOVED, onMouseMoved);
+        }
 
         shadowContainer.getChildren().setAll(parent);
         root.getChildren().setAll(shadowContainer);
@@ -164,16 +210,13 @@ public class DecoratorSkin extends SkinBase<Decorator> {
                 if (s == null) return;
                 Node node = createNavBar(skinnable, s.getLeftPaneWidth(), s.isBackable(), skinnable.canCloseProperty().get(), skinnable.showCloseAsHomeProperty().get(), s.isRefreshable(), s.getTitle(), s.getTitleNode());
                 if (s.isAnimate()) {
-                    AnimationProducer animation;
-                    if (skinnable.getNavigationDirection() == Navigation.NavigationDirection.NEXT) {
-                        animation = ContainerAnimations.SWIPE_LEFT_FADE_SHORT;
-                    } else if (skinnable.getNavigationDirection() == Navigation.NavigationDirection.PREVIOUS) {
-                        animation = ContainerAnimations.SWIPE_RIGHT_FADE_SHORT;
-                    } else {
-                        animation = ContainerAnimations.FADE;
-                    }
+                    TransitionPane.AnimationProducer animation = switch (skinnable.getNavigationDirection()) {
+                        case NEXT -> NavBarAnimations.NEXT;
+                        case PREVIOUS -> NavBarAnimations.PREVIOUS;
+                        default -> ContainerAnimations.FADE;
+                    };
                     skinnable.setNavigationDirection(Navigation.NavigationDirection.START);
-                    navBarPane.setContent(node, animation);
+                    navBarPane.setContent(node, animation, Motion.SHORT4);
                 } else {
                     navBarPane.getChildren().setAll(node);
                 }
@@ -282,6 +325,8 @@ public class DecoratorSkin extends SkinBase<Decorator> {
                 BorderPane.setAlignment(titleNode, Pos.CENTER_LEFT);
                 BorderPane.setMargin(titleNode, new Insets(0, 0, 0, 8));
             }
+            if (onTitleBarDoubleClick != null)
+                center.setOnMouseClicked(onTitleBarDoubleClick);
             navBar.setCenter(center);
 
             if (canRefresh) {
@@ -456,5 +501,67 @@ public class DecoratorSkin extends SkinBase<Decorator> {
                 mouseEvent.consume();
             }
         }
+    }
+
+    enum NavBarAnimations implements TransitionPane.AnimationProducer {
+        NEXT {
+            @Override
+            public void init(TransitionPane container, Node previousNode, Node nextNode) {
+                super.init(container, previousNode, nextNode);
+                nextNode.setTranslateX(container.getWidth());
+            }
+
+            @Override
+            public Timeline animate(
+                    Pane container, Node previousNode, Node nextNode,
+                    Duration duration, Interpolator interpolator) {
+                return new Timeline(
+                        new KeyFrame(Duration.ZERO,
+                                new KeyValue(nextNode.translateXProperty(), 50, interpolator),
+                                new KeyValue(previousNode.translateXProperty(), 0, interpolator),
+                                new KeyValue(nextNode.opacityProperty(), 0, interpolator),
+                                new KeyValue(previousNode.opacityProperty(), 1, interpolator)),
+                        new KeyFrame(duration,
+                                new KeyValue(nextNode.translateXProperty(), 0, interpolator),
+                                new KeyValue(previousNode.translateXProperty(), -50, interpolator),
+                                new KeyValue(nextNode.opacityProperty(), 1, interpolator),
+                                new KeyValue(previousNode.opacityProperty(), 0, interpolator))
+                );
+            }
+
+            @Override
+            public TransitionPane.AnimationProducer opposite() {
+                return NEXT;
+            }
+        },
+
+        PREVIOUS {
+            @Override
+            public void init(TransitionPane container, Node previousNode, Node nextNode) {
+                super.init(container, previousNode, nextNode);
+                nextNode.setTranslateX(container.getWidth());
+            }
+
+            @Override
+            public Timeline animate(Pane container, Node previousNode, Node nextNode, Duration duration, Interpolator interpolator) {
+                return new Timeline(
+                        new KeyFrame(Duration.ZERO,
+                                new KeyValue(nextNode.translateXProperty(), -50, interpolator),
+                                new KeyValue(previousNode.translateXProperty(), 0, interpolator),
+                                new KeyValue(nextNode.opacityProperty(), 0, interpolator),
+                                new KeyValue(previousNode.opacityProperty(), 1, interpolator)),
+                        new KeyFrame(duration,
+                                new KeyValue(nextNode.translateXProperty(), 0, interpolator),
+                                new KeyValue(previousNode.translateXProperty(), 50, interpolator),
+                                new KeyValue(nextNode.opacityProperty(), 1, interpolator),
+                                new KeyValue(previousNode.opacityProperty(), 0, interpolator))
+                );
+            }
+
+            @Override
+            public TransitionPane.AnimationProducer opposite() {
+                return PREVIOUS;
+            }
+        };
     }
 }
